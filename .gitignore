@@ -1,0 +1,22 @@
+# Never commit keys or secrets
+*_ed25519
+*_rsa
+*_ecdsa
+id_*
+!id_*.pub
+*.pem
+*.key
+*.ppk
+*.p12
+*.pfx
+.env
+.env.*
+*secret*
+*password*
+
+# Editor / OS clutter
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+.DS_Store
