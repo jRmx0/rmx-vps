@@ -224,9 +224,18 @@ After changing something on the server:
    git push
    ```
 
-Then copy the README to the server so it's there when you log in:
+5. Update the copy on the server (a read-only clone in `/opt/rmx-vps`, owned by `rmx`):
 
-```powershell
-scp README.md rmx-vps:/tmp/VPS-SETUP.md
-ssh rmx-vps 'sudo install -m 600 -o root -g root /tmp/VPS-SETUP.md /root/VPS-SETUP.md && rm /tmp/VPS-SETUP.md'
-```
+   ```powershell
+   ssh rmx-vps 'git -C /opt/rmx-vps pull --ff-only'
+   ```
+
+   From the dashboard terminal (logged in as root), run it as `rmx` so file ownership stays correct:
+
+   ```bash
+   sudo -u rmx git -C /opt/rmx-vps pull --ff-only
+   ```
+
+On the server, `~/VPS-SETUP.md` (for both root and rmx) is a symlink to `/opt/rmx-vps/README.md`, so `less ~/VPS-SETUP.md` always shows the pulled version.
+
+The server clone has **no push credentials**. Edit on the PC and push from there; the server only pulls.

@@ -4,6 +4,14 @@ Newest entries at the top. Times in UTC. For each change, record **what**, **why
 
 ---
 
+## 2026-10-14 — docs repo cloned to the server
+
+- `git` 2.43.0 used to clone `https://github.com/jRmx0/rmx-vps.git` to `/opt/rmx-vps` (owner `rmx`, read-only: no push credentials on the server).
+- `/root/VPS-SETUP.md` and `/home/rmx/VPS-SETUP.md` replaced with symlinks to `/opt/rmx-vps/README.md`.
+- Root's git config: `safe.directory /opt/rmx-vps`, so root can run read-only git commands in the rmx-owned repo.
+- *Why:* one source of truth. The server copy updates with `git pull` instead of manual `scp`.
+- Undo: `sudo rm -rf /opt/rmx-vps /root/VPS-SETUP.md /home/rmx/VPS-SETUP.md`.
+
 ## 2026-10-14 — initial access & hardening
 
 **Why:** the only way in was `root` + password, open to the internet. Goal: key-based login as a non-root admin user, then lock everything else down.
