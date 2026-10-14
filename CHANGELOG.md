@@ -4,6 +4,15 @@ Newest entries at the top. Times in UTC. For each change, record **what**, **why
 
 ---
 
+## 2026-10-14 — push access from the server (deploy key)
+
+- New key `/home/rmx/.ssh/github-rmx-vps` (ed25519, no passphrase, comment `rmx-vps-server-deploy`), added on GitHub as a **deploy key with write access** to this repo only.
+- `~rmx/.ssh/config`: `Host github-rmx-vps` (github.com, that key, `IdentitiesOnly yes`). GitHub's ED25519 host key was verified (`SHA256:+DiY3wvvV6TuJJhbpZisF/zLDA0zPMSvHdkr4UvCOqU`) and added to `~rmx/.ssh/known_hosts`.
+- `/opt/rmx-vps` remote changed to `git@github-rmx-vps:jRmx0/rmx-vps.git`; repo-local identity set to `jRmx0` with the GitHub no-reply email.
+- *Why:* allows editing the docs from the server (e.g. in the dashboard terminal). A deploy key rather than an account key, so a compromised server can only touch this repo.
+- Undo: delete the deploy key on GitHub, `rm ~/.ssh/github-rmx-vps*`, remove the `Host github-rmx-vps` block, then `git remote set-url origin https://github.com/jRmx0/rmx-vps.git`.
+- This entry was committed and pushed **from the server** as the first test of the key.
+
 ## 2026-10-14 — docs repo cloned to the server
 
 - `git` 2.43.0 used to clone `https://github.com/jRmx0/rmx-vps.git` to `/opt/rmx-vps` (owner `rmx`, read-only: no push credentials on the server).

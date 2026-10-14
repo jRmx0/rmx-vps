@@ -238,4 +238,21 @@ After changing something on the server:
 
 On the server, `~/VPS-SETUP.md` (for both root and rmx) is a symlink to `/opt/rmx-vps/README.md`, so `less ~/VPS-SETUP.md` always shows the pulled version.
 
-The server clone has **no push credentials**. Edit on the PC and push from there; the server only pulls.
+The server clone can also **push**, using a repo-only deploy key (see below). Pull before editing on either side, so the PC and server copies don't diverge.
+
+### Pushing from the server
+
+- Deploy key `/home/rmx/.ssh/github-rmx-vps` (ed25519, no passphrase), added to this repo with **write access**. It works for this repo only, not the rest of the GitHub account.
+- `~rmx/.ssh/config` has `Host github-rmx-vps` → `github.com` with that key; the remote is `git@github-rmx-vps:jRmx0/rmx-vps.git`.
+- Commit identity (repo-local): `jRmx0 <116594512+jRmx0@users.noreply.github.com>`.
+- Always work as `rmx` (root has no access to the key):
+
+  ```bash
+  sudo -u rmx -i            # from the dashboard terminal
+  cd /opt/rmx-vps && git pull --ff-only
+  # edit, then:
+  git add -A && git commit -m "…" && git push
+  ```
+
+- ⚠️ The repo is **public**: everything pushed from the server is published at once. Check `git diff --cached` before committing. Never commit secrets, home IPs or personal emails.
+- To revoke: delete the key in GitHub → repo **Settings → Deploy keys**, then `rm ~/.ssh/github-rmx-vps*` on the server.
