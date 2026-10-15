@@ -20,3 +20,7 @@ id_*
 Thumbs.db
 desktop.ini
 .DS_Store
+
+# Docker services: secrets and runtime data stay on the server
+!.env.example
+services/*/data/

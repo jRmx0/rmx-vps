@@ -1,0 +1,22 @@
+# Caddy: reverse proxy + automatic HTTPS (Let's Encrypt).
+# Public ports 80 (ACME challenge + redirect to HTTPS) and 443 (HTTPS).
+
+services:
+  caddy:
+    image: caddy:2.11
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./site:/srv/site:ro
+      # Certificates and keys live here (gitignored, server only)
+      - ./data/data:/data
+      - ./data/config:/config
+    networks:
+      - edge
+
+networks:
+  edge:
+    name: rmx_edge

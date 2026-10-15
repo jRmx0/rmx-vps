@@ -5,11 +5,13 @@
 | Server | RMX-SERVER / VPS-1, `45.81.252.43`, hostname `vps3124` |
 | OS | Ubuntu 24.04.5 LTS, kernel `6.8.0-147-generic` (after reboot) |
 | Host key | ED25519 `SHA256:OHYSCh1xGk1SAUt6brhpWSneyloXz8wfp35j+VipXqI` |
-| Admin user | `rmx` (sudo, no password) |
+| Admin user | `rmx` (sudo, no password; in group `docker`) |
 | Admin PC | Windows 11, PowerShell, OpenSSH client |
 | Setup date | 2026-10-14 (times in UTC) |
+| Domain | `rmx.lt` (`@` A → this IP; `api`, `mqtt`, `www` CNAME → `rmx.lt.`) |
+| Public ports | 22 (SSH), 80 + 443 (Caddy). See [§10](#10-docker--services) |
 
-**This repo:** `README.md` (this file) describes the current state. [`CHANGELOG.md`](CHANGELOG.md) gets one dated entry per change. [`config/`](config/) holds copies of the server's config files, pulled with the commands in [§9](#9-updating-this-repo).
+**This repo:** `README.md` (this file) describes the current state. [`CHANGELOG.md`](CHANGELOG.md) gets one dated entry per change. [`config/`](config/) holds copies of the server's config files, pulled with the commands in [§9](#9-updating-this-repo). [`services/`](services/) holds the Docker Compose stack, run from the server clone (see [§10](#10-docker--services)).
 
 > No secrets in this repo: no passwords, private keys or tokens. `.gitignore` blocks common key files.
 
@@ -146,7 +148,15 @@ Default: deny (incoming), allow (outgoing), disabled (routed)
 22/tcp (OpenSSH (v6))   ALLOW IN    Anywhere (v6)
 ```
 
-Opening another port later, e.g. HTTPS: `sudo ufw allow 443/tcp`.
+```
+80/tcp                  ALLOW IN    Anywhere        # HTTP (Caddy, ACME)
+443/tcp                 ALLOW IN    Anywhere        # HTTPS (Caddy)
+(+ the same two for v6)
+```
+
+Opening another port: `sudo ufw allow PORT/tcp comment "what it is"`.
+
+> ⚠️ **ufw does not protect Docker ports.** A port published by a container is reachable from the internet even without a ufw rule. See [§10](#10-docker--services).
 
 **fail2ban** — enabled, `sshd` jail on, backend `systemd`, action `nftables`.
 
@@ -193,6 +203,7 @@ sudo ufw status verbose
 
 | Task | How |
 |---|---|
+| Stop / remove Caddy | See [§10 Undo](#undo) |
 | Remove dashboard root access | Delete the `Match Address 45.81.252.94` block at the end of `/etc/ssh/sshd_config`, `sudo sshd -t && sudo systemctl reload ssh`; optionally remove `/etc/fail2ban/jail.d/ignore-dashboard.local` and `sudo systemctl restart fail2ban` |
 | Change the root password | `sudo passwd root` (used only by the dashboard terminal) |
 | Add another key / PC | Append its `.pub` line to `/home/rmx/.ssh/authorized_keys` |
@@ -214,6 +225,8 @@ After changing something on the server:
    ssh rmx-vps 'sudo cat /etc/ssh/sshd_config.d/00-hardening.conf' | Set-Content config\ssh\sshd_config.d\00-hardening.conf
    ssh rmx-vps 'sudo cat /etc/fail2ban/jail.d/ignore-dashboard.local' | Set-Content config\fail2ban\jail.d\ignore-dashboard.local
    ssh rmx-vps 'sudo ufw status verbose' | Set-Content config\ufw\status.txt
+   ssh rmx-vps 'cat /etc/docker/daemon.json' | Set-Content config\docker\daemon.json
+   ssh rmx-vps 'cat /etc/apt/sources.list.d/docker.sources' | Set-Content config\docker\docker.sources
    ```
 
 4. Commit and push:
@@ -256,3 +269,100 @@ The server clone can also **push**, using a repo-only deploy key (see below). Pu
 
 - ⚠️ The repo is **public**: everything pushed from the server is published at once. Check `git diff --cached` before committing. Never commit secrets, home IPs or personal emails.
 - To revoke: delete the key in GitHub → repo **Settings → Deploy keys**, then `rm ~/.ssh/github-rmx-vps*` on the server.
+
+---
+
+## 10. Docker & services
+
+### Docker
+
+- Docker Engine **29.9.1** + Compose plugin **v5.6.0**, from Docker's official apt repo (not Ubuntu's `docker.io` package).
+  - Repo: `/etc/apt/sources.list.d/docker.sources` (copy in [`config/docker/`](config/docker/)), key `/etc/apt/keyrings/docker.asc`, fingerprint `9DC8 5822 9FC7 DD38 854A E2D8 8D81 803C 0EBF CD88` (matches Docker's docs).
+  - Updates arrive with the normal `sudo apt update && sudo apt upgrade`.
+- `/etc/docker/daemon.json`: container logs rotate at 10 MB × 3 files, so they can't fill the disk.
+- `docker` and `containerd` start at boot. Containers with `restart: unless-stopped` come back after a reboot.
+- `rmx` is in the `docker` group, so `docker …` works without `sudo`. (That group is effectively root, but `rmx` already has passwordless sudo.)
+
+### ⚠️ Docker bypasses ufw — port policy
+
+Docker writes its own iptables rules for published ports. That traffic goes through the `FORWARD` chain, and ufw's rules (on `INPUT`) never see it. **A published port is open to the whole internet, whatever ufw says.**
+
+Tested on 2026-10-15 with a throwaway `nginx` container while ufw allowed only 22:
+
+| Published as | ufw rule for 8080? | From the internet |
+|---|---|---|
+| `-p 8080:80` | none | **HTTP 200: reachable** |
+| `-p 127.0.0.1:8080:80` | none | timeout: not reachable (only from the server itself) |
+
+**Rules for this server:**
+
+1. **Databases publish no ports.** They sit on the `backend` network, and only the app can reach them.
+2. **Private tools** (admin UIs, dashboards, debug ports) bind to localhost: `"127.0.0.1:PORT:PORT"`. Reach them through an SSH tunnel from the PC: `ssh -L PORT:127.0.0.1:PORT rmx-vps`, then open `http://localhost:PORT`.
+3. **Public ports are deliberate:** listed in the table below, documented in the CHANGELOG, and each gets a matching ufw rule, so `ufw status` stays an honest list of what's open.
+
+Check what is really listening: `sudo ss -tlnp` and `docker ps --format '{{.Names}} {{.Ports}}'`.
+
+### Layout
+
+```
+services/
+├── compose.yaml          # project "rmx": includes each service, defines the networks
+└── caddy/
+    ├── compose.yaml      # Caddy container
+    ├── Caddyfile         # sites, TLS, redirects
+    ├── site/index.html   # placeholder page for rmx.lt
+    └── data/             # (server only, gitignored) certificates + Caddy state
+```
+
+- Per-service secrets go in `services/<name>/.env` (gitignored). Commit a `.env.example` with placeholder values next to it.
+- Runtime data goes in `services/<name>/data/` (gitignored, owned by root). It lives only on the server, and nothing backs it up.
+
+**Networks** (defined in `services/compose.yaml`):
+
+| Network | Docker name | Members | Notes |
+|---|---|---|---|
+| `edge` | `rmx_edge` | Caddy (later Mosquitto, app) | Normal bridge with internet access |
+| `backend` | `rmx_backend` | (later app, database) | `internal: true`: no internet access. Created when the first service uses it |
+
+### Public ports
+
+| Port | Service | ufw | Purpose |
+|---|---|---|---|
+| 22/tcp | sshd (host) | ✅ | SSH |
+| 80/tcp | Caddy | ✅ | Let's Encrypt HTTP-01 challenge, redirect to HTTPS |
+| 443/tcp | Caddy | ✅ | HTTPS (HTTP/1.1 + HTTP/2). HTTP/3 is turned off, so 443/udp stays closed |
+
+### Caddy
+
+- Image `caddy:2.11` (2.11.7 when installed); container `rmx-caddy-1`.
+- Sites:
+  - `https://rmx.lt`: static placeholder page from `site/`
+  - `https://api.rmx.lt`: placeholder JSON `{"service":"rmx-api","status":"placeholder"}`
+  - `https://www.rmx.lt/…` → **301** to `https://rmx.lt/…`
+  - every `http://…` → **308** to `https://…`
+- Certificates: Let's Encrypt (issuer `YE2`), one per name, obtained automatically on first start (2026-10-15, valid until 2027-01-13). Caddy renews them about 30 days before they expire. No ACME email is set (Let's Encrypt no longer sends expiry emails, and an email would end up in this public repo).
+- State: `services/caddy/data/data` → `/data` (certs, ACME account key) and `services/caddy/data/config` → `/config`. If these are deleted, Caddy just requests new certificates. Let's Encrypt allows 5 duplicate certificates per week, so don't delete them in a loop.
+
+### Everyday commands (on the server)
+
+```bash
+cd /opt/rmx-vps/services
+docker compose ps                         # what is running
+docker compose logs -f caddy              # follow Caddy logs (Ctrl+C to stop)
+docker compose up -d                      # start / apply compose changes
+docker compose restart caddy              # apply Caddyfile / site changes
+docker compose pull && docker compose up -d   # update images
+```
+
+Deploy a change made on the PC: commit + push, then `ssh rmx-vps 'git -C /opt/rmx-vps pull --ff-only'`, then run the matching command above. A changed `compose.yaml` needs `up -d`. A changed `Caddyfile` needs `restart caddy`: git replaces the file, and the container keeps seeing the old one until it restarts.
+
+Check the certificates from the PC: `curl.exe -vI https://rmx.lt` (Windows curl verifies the chain and fails loudly if it's bad).
+
+### Undo
+
+| Undo | How |
+|---|---|
+| Stop Caddy (keep everything) | `cd /opt/rmx-vps/services && docker compose down` |
+| Close 80/443 | `sudo ufw delete allow 80/tcp && sudo ufw delete allow 443/tcp`. Also stop Caddy, because Docker keeps the ports open without ufw |
+| Delete Caddy's certificates and state | `sudo rm -rf /opt/rmx-vps/services/caddy/data` (after `down`) |
+| Remove Docker completely | `docker compose down`, then `sudo apt purge docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin docker-ce-rootless-extras`, `sudo rm -rf /var/lib/docker /var/lib/containerd /etc/docker /etc/apt/sources.list.d/docker.sources /etc/apt/keyrings/docker.asc`, `sudo gpasswd -d rmx docker` |

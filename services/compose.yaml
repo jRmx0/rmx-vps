@@ -1,0 +1,25 @@
+# Blade of Grass server stack. Run from this folder on the server:
+#   cd /opt/rmx-vps/services && docker compose up -d
+#
+# Each service lives in its own folder with its own compose.yaml,
+# pulled in below. Networks are defined here, once, for all of them.
+#
+# PORT POLICY (Docker bypasses ufw, see README §10):
+#   - databases publish NO ports
+#   - private tools bind to 127.0.0.1 only ("127.0.0.1:PORT:PORT")
+#   - public ports are deliberate, documented in the README,
+#     and get a matching ufw rule
+
+name: rmx
+
+include:
+  - caddy/compose.yaml
+
+networks:
+  # Public-facing services: Caddy, Mosquitto, app
+  edge:
+    name: rmx_edge
+  # Private: app <-> database. "internal" = no route to the internet.
+  backend:
+    name: rmx_backend
+    internal: true

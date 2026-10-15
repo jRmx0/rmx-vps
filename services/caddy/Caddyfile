@@ -1,0 +1,25 @@
+# Global options
+{
+	# HTTP/1.1 and HTTP/2 only. HTTP/3 would need 443/udp, which we don't open.
+	servers {
+		protocols h1 h2
+	}
+}
+
+# Main site: placeholder page
+rmx.lt {
+	root * /srv/site
+	file_server
+	encode zstd gzip
+}
+
+# API: placeholder until the app container exists
+api.rmx.lt {
+	header Content-Type application/json
+	respond `{"service":"rmx-api","status":"placeholder"}` 200
+}
+
+# www -> bare domain (301, keeps the path)
+www.rmx.lt {
+	redir https://rmx.lt{uri} permanent
+}

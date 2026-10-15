@@ -4,6 +4,33 @@ Newest entries at the top. Times in UTC. For each change, record **what**, **why
 
 ---
 
+## 2026-10-15 — Docker + Caddy (HTTPS for rmx.lt)
+
+### Docker
+- Installed Docker Engine 29.9.1 + Compose v5.6.0 (`docker-ce`, `docker-ce-cli`, `containerd.io`, `docker-buildx-plugin`, `docker-compose-plugin`) from Docker's official apt repo. Key fingerprint checked: `9DC8 5822 9FC7 DD38 854A E2D8 8D81 803C 0EBF CD88`.
+- `/etc/docker/daemon.json`: json-file logs rotated at 10 MB × 3.
+- `rmx` added to the `docker` group.
+- *Why:* every part of the IoT backend (Caddy, Mosquitto, app, DB) runs as a Compose service.
+- **Docker bypasses ufw.** Tested: a throwaway nginx on `-p 8080:80` was reachable from the internet with no ufw rule, and on `-p 127.0.0.1:8080:80` it wasn't. The container and image were removed afterwards. Port policy written in README §10.
+- Undo: README §10 → Undo ("Remove Docker completely").
+
+### Repo
+- New `services/` layout: `services/compose.yaml` (project `rmx`, `include`s each service; networks `edge` = `rmx_edge` and `backend` = `rmx_backend`, internal) and `services/caddy/`.
+- `.gitignore`: `services/*/data/` (runtime data) and `!.env.example` (`.env` stays ignored).
+- `config/docker/`: copies of `daemon.json` and `docker.sources`.
+
+### Firewall
+- `ufw allow 80/tcp` (HTTP, ACME) and `ufw allow 443/tcp` (HTTPS), with comments. ufw now allows 22, 80, 443 only.
+- *Why:* needed for Let's Encrypt and HTTPS. Docker would open them anyway, but the rule keeps `ufw status` honest.
+- Undo: `sudo ufw delete allow 80/tcp && sudo ufw delete allow 443/tcp` (and stop Caddy).
+
+### Caddy
+- `caddy:2.11` (2.11.7) running as `rmx-caddy-1` from `/opt/rmx-vps/services`, on the `edge` network, publishing 80 and 443/tcp only (HTTP/3 off).
+- `rmx.lt` → placeholder page; `api.rmx.lt` → placeholder JSON; `www.rmx.lt` → 301 to `rmx.lt`; HTTP → 308 to HTTPS.
+- Let's Encrypt certificates for `rmx.lt`, `api.rmx.lt`, `www.rmx.lt` obtained automatically (issuer `YE2`, valid until 2027-01-13). Verified from the PC with `curl.exe -v`; chain valid.
+- State persisted on the server in `services/caddy/data/` (gitignored). No backup (by choice).
+- Undo: `cd /opt/rmx-vps/services && docker compose down`; optionally `sudo rm -rf caddy/data`.
+
 ## 2026-10-14 — push access from the server (deploy key)
 
 - New key `/home/rmx/.ssh/github-rmx-vps` (ed25519, no passphrase, comment `rmx-vps-server-deploy`), added on GitHub as a **deploy key with write access** to this repo only.
