@@ -4,6 +4,7 @@
 |---|---|
 | Server | RMX-SERVER / VPS-1, `45.81.252.43`, hostname `vps3124` |
 | OS | Ubuntu 24.04.5 LTS, kernel `6.8.0-147-generic` (after reboot) |
+| Memory | ~1 GB RAM + 2 GB swapfile `/swapfile` (`vm.swappiness=10`) |
 | Host key | ED25519 `SHA256:OHYSCh1xGk1SAUt6brhpWSneyloXz8wfp35j+VipXqI` |
 | Admin user | `rmx` (sudo, no password; in group `docker`) |
 | Admin PC | Windows 11, PowerShell, OpenSSH client |
@@ -204,6 +205,8 @@ sudo ufw status verbose
 | Task | How |
 |---|---|
 | Stop / remove Caddy | See [§10 Undo](#undo) |
+| Check memory / swap | `free -h`, `swapon --show`. If swap is used heavily all the time, the server needs more RAM |
+| Remove the swapfile | `sudo swapoff /swapfile`, delete the `/swapfile` line from `/etc/fstab` (backup: `/etc/fstab.bak-pre-swap`), `sudo rm /swapfile /etc/sysctl.d/60-swappiness.conf`, `sudo systemctl daemon-reload` |
 | Remove dashboard root access | Delete the `Match Address 45.81.252.94` block at the end of `/etc/ssh/sshd_config`, `sudo sshd -t && sudo systemctl reload ssh`; optionally remove `/etc/fail2ban/jail.d/ignore-dashboard.local` and `sudo systemctl restart fail2ban` |
 | Change the root password | `sudo passwd root` (used only by the dashboard terminal) |
 | Add another key / PC | Append its `.pub` line to `/home/rmx/.ssh/authorized_keys` |
@@ -227,6 +230,7 @@ After changing something on the server:
    ssh rmx-vps 'sudo ufw status verbose' | Set-Content config\ufw\status.txt
    ssh rmx-vps 'cat /etc/docker/daemon.json' | Set-Content config\docker\daemon.json
    ssh rmx-vps 'cat /etc/apt/sources.list.d/docker.sources' | Set-Content config\docker\docker.sources
+   ssh rmx-vps 'cat /etc/sysctl.d/60-swappiness.conf' | Set-Content config\sysctl.d\60-swappiness.conf
    ```
 
 4. Commit and push:

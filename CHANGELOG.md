@@ -4,6 +4,14 @@ Newest entries at the top. Times in UTC. For each change, record **what**, **why
 
 ---
 
+## 2026-10-15 — 2 GB swapfile
+
+- `/swapfile` (2 GB, root-only `0600`) created with `fallocate`, `mkswap`, `swapon`; `/swapfile none swap sw 0 0` appended to `/etc/fstab` so it turns on at boot (checked with `findmnt --verify` and systemd's `swapfile.swap` unit, no reboot needed).
+- `/etc/sysctl.d/60-swappiness.conf`: `vm.swappiness=10` (default 60), so the kernel swaps only under real memory pressure.
+- *Why:* the VPS has ~1 GB RAM and had no swap, so a memory spike (DB query, image pull, apt upgrade) would make the OOM killer kill a process, often the database. Swap turns that into a short slowdown. Done before adding TimescaleDB.
+- Backup: `/etc/fstab.bak-pre-swap`.
+- Undo: `sudo swapoff /swapfile`, remove the line from `/etc/fstab`, `sudo rm /swapfile /etc/sysctl.d/60-swappiness.conf`, `sudo systemctl daemon-reload`.
+
 ## 2026-10-15 — Docker + Caddy (HTTPS for rmx.lt)
 
 ### Docker
