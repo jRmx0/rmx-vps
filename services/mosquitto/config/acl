@@ -1,5 +1,7 @@
 # Mosquitto access rules (ACL). Anything not allowed here is denied.
-# Reload after editing: docker compose kill -s HUP mosquitto
+# This file is the source; Mosquitto reads an installed copy. After editing:
+#   sudo install -o 1883 -g 1883 -m 0600 config/acl data/auth/acl
+#   docker compose kill -s HUP mosquitto
 #
 # Topics per mower (<id> = the mower's username, e.g. mower-01):
 #   mower/<id>/telemetry   mower -> server

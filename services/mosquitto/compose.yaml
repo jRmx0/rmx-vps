@@ -11,11 +11,11 @@ services:
     ports:
       - "8883:8883"
     volumes:
-      # Config and ACL from this repo (no secrets in them)
+      # Config from this repo (no secrets in it)
       - ./config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
-      - ./config/acl:/mosquitto/config/acl:ro
       # Server only (gitignored):
       #   data/auth/passwd  - logins (hashed), owner 1883, mode 0600
+      #   data/auth/acl     - installed copy of config/acl, owner 1883, mode 0600
       #   data/certs/       - TLS cert + key, copied from Caddy by cert-sync
       #   data/store/       - persistence (retained messages, sessions)
       - ./data/auth:/mosquitto/auth
