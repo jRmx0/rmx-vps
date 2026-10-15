@@ -8,7 +8,9 @@ To                         Action      From
 22/tcp (OpenSSH)           ALLOW IN    Anywhere                  
 80/tcp                     ALLOW IN    Anywhere                   # HTTP (Caddy, ACME)
 443/tcp                    ALLOW IN    Anywhere                   # HTTPS (Caddy)
+8883/tcp                   ALLOW IN    Anywhere                   # MQTT over TLS (Mosquitto)
 22/tcp (OpenSSH (v6))      ALLOW IN    Anywhere (v6)             
 80/tcp (v6)                ALLOW IN    Anywhere (v6)              # HTTP (Caddy, ACME)
 443/tcp (v6)               ALLOW IN    Anywhere (v6)              # HTTPS (Caddy)
+8883/tcp (v6)              ALLOW IN    Anywhere (v6)              # MQTT over TLS (Mosquitto)
 

@@ -4,6 +4,31 @@ Newest entries at the top. Times in UTC. For each change, record **what**, **why
 
 ---
 
+## 2026-10-15 — Mosquitto: MQTT over TLS on mqtt.rmx.lt:8883
+
+*Why:* Phase 3. The mowers need a broker for telemetry, status and commands. It needs TLS and a login, and each mower may use only its own topics.
+
+### Caddy
+- New `mqtt.rmx.lt` site block in `services/caddy/Caddyfile` (responds with a one-line text). It's there so Caddy obtains and renews the certificate that Mosquitto uses. Let's Encrypt issued it on 2026-10-15 (issuer `YE1`, valid until 2027-01-13).
+
+### Mosquitto
+- New service `services/mosquitto/` (included from `services/compose.yaml`): `eclipse-mosquitto:2.1-alpine` (2.1.2), container `rmx-mosquitto-1`, on `rmx_edge`, `mem_limit: 64m`, `restart: unless-stopped`.
+- `config/mosquitto.conf`: listener **8883** with TLS (minimum 1.2) and `use_username_as_clientid`, plus listener **1883** (plain MQTT, *not published*, for the app container). `allow_anonymous false`, password file, ACL file, persistence on, logs to stdout.
+- `config/acl`: `app` → `mower/#`; every other login → `mower/<username>/#` (`pattern … %u`). An installed copy (`data/auth/acl`, owner 1883, `0600`) is used because Mosquitto warns about world-readable ACL files, and future versions will refuse them.
+- Logins `app` and `mower-01` with random 32-character passwords. Hashes are in `data/auth/passwd`; the plain-text passwords are in `data/credentials.txt` (root, `0600`). Both are server only and gitignored.
+- `tests/mqtt-tests.ps1`: test suite run from the Windows PC over the internet. 12/12 passed: valid chain for `mqtt.rmx.lt`, TLS 1.1 refused, mower-01 publish and subscribe on its own topics, retained status, mower-01 gets nothing from mower-02's topics and can't publish there, anonymous and wrong password refused, client-ID takeover, 1883 not reachable.
+- Found while testing: on Windows, the Mosquitto clients' `--tls-use-os-certs` and `-W` don't work. The test script works around both (README §10).
+
+### Certificate sync (new on the host)
+- `/usr/local/sbin/rmx-mqtt-cert-sync`, `/etc/systemd/system/rmx-mqtt-cert-sync.service` and `.timer` (sources in `services/mosquitto/cert-sync/`). Twice a day, the script copies Caddy's cert and key for `mqtt.rmx.lt` to `services/mosquitto/data/certs/` (owner 1883, key `0600`) if they changed, then sends SIGHUP to Mosquitto.
+- *Why:* Caddy's certificate files are root-only, and Mosquitto runs as uid 1883. Copying avoids a second ACME client and keeps Caddy's data private. Tested: after SIGHUP, Mosquitto serves the new certificate without a restart.
+
+### Firewall
+- `ufw allow 8883/tcp comment "MQTT over TLS (Mosquitto)"` (IPv4 + IPv6). ufw now allows 22, 80, 443 and 8883.
+
+### Undo
+- See README §10 → Undo ("Close 8883", "Remove Mosquitto completely"). No backup of the logins or retained messages (by choice).
+
 ## 2026-10-15 — 2 GB swapfile
 
 - `/swapfile` (2 GB, root-only `0600`) created with `fallocate`, `mkswap`, `swapon`; `/swapfile none swap sw 0 0` appended to `/etc/fstab` so it turns on at boot (checked with `findmnt --verify` and systemd's `swapfile.swap` unit, no reboot needed).

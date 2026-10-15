@@ -10,7 +10,7 @@
 | Admin PC | Windows 11, PowerShell, OpenSSH client |
 | Setup date | 2026-10-14 (times in UTC) |
 | Domain | `rmx.lt` (`@` A → this IP; `api`, `mqtt`, `www` CNAME → `rmx.lt.`) |
-| Public ports | 22 (SSH), 80 + 443 (Caddy). See [§10](#10-docker--services) |
+| Public ports | 22 (SSH), 80 + 443 (Caddy), 8883 (MQTT over TLS, Mosquitto). See [§10](#10-docker--services) |
 
 **This repo:** `README.md` (this file) describes the current state. [`CHANGELOG.md`](CHANGELOG.md) gets one dated entry per change. [`config/`](config/) holds copies of the server's config files, pulled with the commands in [§9](#9-updating-this-repo). [`services/`](services/) holds the Docker Compose stack, run from the server clone (see [§10](#10-docker--services)).
 
@@ -152,7 +152,8 @@ Default: deny (incoming), allow (outgoing), disabled (routed)
 ```
 80/tcp                  ALLOW IN    Anywhere        # HTTP (Caddy, ACME)
 443/tcp                 ALLOW IN    Anywhere        # HTTPS (Caddy)
-(+ the same two for v6)
+8883/tcp                ALLOW IN    Anywhere        # MQTT over TLS (Mosquitto)
+(+ the same three for v6)
 ```
 
 Opening another port: `sudo ufw allow PORT/tcp comment "what it is"`.
@@ -204,7 +205,7 @@ sudo ufw status verbose
 
 | Task | How |
 |---|---|
-| Stop / remove Caddy | See [§10 Undo](#undo) |
+| Stop / remove Caddy or Mosquitto | See [§10 Undo](#undo) |
 | Check memory / swap | `free -h`, `swapon --show`. If swap is used heavily all the time, the server needs more RAM |
 | Remove the swapfile | `sudo swapoff /swapfile`, delete the `/swapfile` line from `/etc/fstab` (backup: `/etc/fstab.bak-pre-swap`), `sudo rm /swapfile /etc/sysctl.d/60-swappiness.conf`, `sudo systemctl daemon-reload` |
 | Remove dashboard root access | Delete the `Match Address 45.81.252.94` block at the end of `/etc/ssh/sshd_config`, `sudo sshd -t && sudo systemctl reload ssh`; optionally remove `/etc/fail2ban/jail.d/ignore-dashboard.local` and `sudo systemctl restart fail2ban` |
@@ -311,11 +312,19 @@ Check what is really listening: `sudo ss -tlnp` and `docker ps --format '{{.Name
 ```
 services/
 ├── compose.yaml          # project "rmx": includes each service, defines the networks
-└── caddy/
-    ├── compose.yaml      # Caddy container
-    ├── Caddyfile         # sites, TLS, redirects
-    ├── site/index.html   # placeholder page for rmx.lt
-    └── data/             # (server only, gitignored) certificates + Caddy state
+├── caddy/
+│   ├── compose.yaml      # Caddy container
+│   ├── Caddyfile         # sites, TLS, redirects
+│   ├── site/index.html   # placeholder page for rmx.lt
+│   └── data/             # (server only, gitignored) certificates + Caddy state
+└── mosquitto/
+    ├── compose.yaml      # Mosquitto container
+    ├── config/
+    │   ├── mosquitto.conf  # listeners, TLS, logins, persistence
+    │   └── acl             # access rules (source; Mosquitto reads an installed copy)
+    ├── cert-sync/        # host script + systemd timer: Caddy's cert -> Mosquitto
+    ├── tests/mqtt-tests.ps1  # test suite, run from the Windows PC
+    └── data/             # (server only, gitignored) logins, cert copy, persistence
 ```
 
 - Per-service secrets go in `services/<name>/.env` (gitignored). Commit a `.env.example` with placeholder values next to it.
@@ -325,7 +334,7 @@ services/
 
 | Network | Docker name | Members | Notes |
 |---|---|---|---|
-| `edge` | `rmx_edge` | Caddy (later Mosquitto, app) | Normal bridge with internet access |
+| `edge` | `rmx_edge` | Caddy, Mosquitto (later app) | Normal bridge with internet access |
 | `backend` | `rmx_backend` | (later app, database) | `internal: true`: no internet access. Created when the first service uses it |
 
 ### Public ports
@@ -335,6 +344,9 @@ services/
 | 22/tcp | sshd (host) | ✅ | SSH |
 | 80/tcp | Caddy | ✅ | Let's Encrypt HTTP-01 challenge, redirect to HTTPS |
 | 443/tcp | Caddy | ✅ | HTTPS (HTTP/1.1 + HTTP/2). HTTP/3 is turned off, so 443/udp stays closed |
+| 8883/tcp | Mosquitto | ✅ | MQTT over TLS (`mqtt.rmx.lt`), login required |
+
+Not public: Mosquitto's plain MQTT port **1883** is not published. Only containers on `rmx_edge` (the app, later) can reach it, as `mosquitto:1883`.
 
 ### Caddy
 
@@ -343,9 +355,93 @@ services/
   - `https://rmx.lt`: static placeholder page from `site/`
   - `https://api.rmx.lt`: placeholder JSON `{"service":"rmx-api","status":"placeholder"}`
   - `https://www.rmx.lt/…` → **301** to `https://rmx.lt/…`
+  - `https://mqtt.rmx.lt`: a one-line text. The block exists so that Caddy obtains and renews the certificate Mosquitto uses (see [Mosquitto](#mosquitto-mqtt))
   - every `http://…` → **308** to `https://…`
-- Certificates: Let's Encrypt (issuer `YE2`), one per name, obtained automatically on first start (2026-10-15, valid until 2027-01-13). Caddy renews them about 30 days before they expire. No ACME email is set (Let's Encrypt no longer sends expiry emails, and an email would end up in this public repo).
+- Certificates: Let's Encrypt (issuers `YE1`/`YE2`), one per name, obtained automatically on first start (2026-10-15, valid until 2027-01-13). Caddy renews them about 30 days before they expire. No ACME email is set (Let's Encrypt no longer sends expiry emails, and an email would end up in this public repo).
 - State: `services/caddy/data/data` → `/data` (certs, ACME account key) and `services/caddy/data/config` → `/config`. If these are deleted, Caddy just requests new certificates. Let's Encrypt allows 5 duplicate certificates per week, so don't delete them in a loop.
+
+### Mosquitto (MQTT)
+
+- Image `eclipse-mosquitto:2.1-alpine` (2.1.2 when installed; there is no plain `2.1` tag); container `rmx-mosquitto-1`; `mem_limit: 64m` (it uses ~3.5 MB).
+- Listeners ([`config/mosquitto.conf`](services/mosquitto/config/mosquitto.conf)):
+  - **8883**: MQTT over TLS, TLS 1.2 minimum (1.3 preferred), certificate for `mqtt.rmx.lt`. Published.
+  - **1883**: plain MQTT for containers on `rmx_edge` (the app). Not published.
+  - Both: `allow_anonymous false`, logins from `data/auth/passwd`, rules from `data/auth/acl`.
+- On 8883, `use_username_as_clientid true`: the client ID is always the username. A second login as `mower-01` replaces the first (the broker logs "session taken over"), so one device can't kick another off by copying its client ID.
+- Persistence on (`data/store/mosquitto.db`, saved every 5 min and on shutdown): retained messages and persistent sessions survive restarts.
+- Logs go to stdout: `docker compose logs -f mosquitto`. They contain client IP addresses, so don't paste them into this repo.
+
+**Logins and topics**
+
+| Login | Can use | Purpose |
+|---|---|---|
+| `app` | `mower/#` (read + write) | The backend app (Phase 5) |
+| `mower-01` | `mower/mower-01/#` only | First mower |
+
+The rule in [`config/acl`](services/mosquitto/config/acl): every login gets `mower/<its username>/#` (`pattern readwrite mower/%u/#`). A new mower needs a login only, no ACL change. Planned topics: `mower/<id>/telemetry`, `mower/<id>/status` (retained, also the last-will), `mower/<id>/cmd`, `mower/<id>/cmd/ack`.
+
+How Mosquitto enforces it: a mower may **subscribe** to another mower's topic (the SUBSCRIBE is accepted), but no message from there is ever delivered to it. A **publish** to another mower's topic is dropped; with MQTT 5 and QoS 1 the client is told `Not authorized`.
+
+Server-only files in `services/mosquitto/data/` (gitignored, no backup):
+
+| Path | Owner / mode | Contents |
+|---|---|---|
+| `auth/passwd` | 1883, `0600` | Logins (salted password hashes) |
+| `auth/acl` | 1883, `0600` | Installed copy of `config/acl` |
+| `certs/fullchain.pem`, `certs/privkey.pem` | 1883, `0644` / `0600` | Copy of Caddy's certificate (see below) |
+| `store/` | 1883, `0700` | Persistence |
+| `credentials.txt` | root, `0600` | The **plain-text passwords**, one `user password` per line |
+
+Read the passwords (on the server): `sudo cat /opt/rmx-vps/services/mosquitto/data/credentials.txt`
+
+**Add a mower** (example `mower-02`, on the server):
+
+```bash
+cd /opt/rmx-vps/services
+P=$(openssl rand -base64 48 | tr -dc 'A-Za-z0-9' | head -c 32)
+docker compose exec -u mosquitto mosquitto mosquitto_passwd -b /mosquitto/auth/passwd mower-02 "$P"
+echo "mower-02 $P" | sudo tee -a mosquitto/data/credentials.txt >/dev/null; unset P
+docker compose kill -s HUP mosquitto      # reload logins, no disconnects
+```
+
+The mower then connects to `mqtt.rmx.lt:8883` with TLS, username `mower-02` and that password, and uses `mower/mower-02/…`.
+
+- New password for a login: the same commands (it replaces the old one); delete the old line in `credentials.txt`.
+- Remove a login: `docker compose exec -u mosquitto mosquitto mosquitto_passwd -D /mosquitto/auth/passwd mower-02`, then the HUP, then delete its line in `credentials.txt`. A client that is already connected stays connected until it reconnects (or `docker compose restart mosquitto`).
+- Changed `config/acl` (after `git pull`): `sudo install -o 1883 -g 1883 -m 0600 mosquitto/config/acl mosquitto/data/auth/acl && docker compose kill -s HUP mosquitto`. Mosquitto reads a copy because it warns about ACL files that are world-readable or not owned by its user, and future versions will refuse them.
+- Changed `config/mosquitto.conf`: `docker compose restart mosquitto` (after `git pull` the file bind mount keeps the old inode, like the Caddyfile).
+
+**How the certificate gets to Mosquitto (and survives renewals)**
+
+1. Caddy has an `mqtt.rmx.lt` site block, so it obtains the Let's Encrypt certificate and renews it automatically, about 30 days before it expires (so roughly every 60 days). It stores it root-only in `caddy/data/data/caddy/certificates/…/mqtt.rmx.lt/`.
+2. Mosquitto runs as uid 1883 and can't read that folder. The host script `/usr/local/sbin/rmx-mqtt-cert-sync` (source: [`cert-sync/`](services/mosquitto/cert-sync/)) checks that the cert and key belong together and compares them with Mosquitto's copy. Only if they changed does it copy them to `mosquitto/data/certs/` (owner 1883, key `0600`, written atomically) and send **SIGHUP** to Mosquitto. On SIGHUP Mosquitto reloads the certificate without dropping connected clients (tested on 2026-10-15 by swapping in a self-signed cert and back).
+3. `rmx-mqtt-cert-sync.timer` runs the script twice a day (03:30 and 15:30 UTC, up to 30 min later), and 5 minutes after boot. It catches up after downtime.
+
+Why this way: no second ACME client (certbot) competing with Caddy for port 80, and Caddy's data stays root-only. Mosquitto gets a copy of only the one key it needs.
+
+```bash
+systemctl list-timers rmx-mqtt-cert-sync.timer    # next run
+sudo systemctl start rmx-mqtt-cert-sync.service    # run it now
+sudo journalctl -u rmx-mqtt-cert-sync.service      # what it did
+```
+
+If the script in the repo changes, reinstall it (the units likewise go to `/etc/systemd/system/`, followed by `sudo systemctl daemon-reload`):
+`sudo install -m 0755 /opt/rmx-vps/services/mosquitto/cert-sync/rmx-mqtt-cert-sync.sh /usr/local/sbin/rmx-mqtt-cert-sync`
+
+**Test from the Windows PC**
+
+The [Mosquitto clients for Windows](https://mosquitto.org/download/) (`mosquitto_pub`, `mosquitto_sub`) are installed in `C:\Program Files\mosquitto`. Two Windows quirks:
+
+- `--tls-use-os-certs` doesn't work on Windows (it fails with "protocol error"). Export Windows' trusted root CAs to a PEM file and pass it with `--cafile` (the test script does this).
+- `mosquitto_sub -W` (timeout) doesn't stop the program on Windows. Use Ctrl+C.
+
+The test suite checks the TLS chain, that TLS 1.1 is refused, that the own topics work, that the other mower's topics are blocked, that anonymous and wrong-password logins are refused, the client ID takeover, and that 1883 is closed. Run it from the repo folder:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File services\mosquitto\tests\mqtt-tests.ps1
+```
+
+All 12 tests passed on 2026-10-15.
 
 ### Everyday commands (on the server)
 
@@ -353,6 +449,8 @@ services/
 cd /opt/rmx-vps/services
 docker compose ps                         # what is running
 docker compose logs -f caddy              # follow Caddy logs (Ctrl+C to stop)
+docker compose logs -f mosquitto          # follow Mosquitto logs (connections, errors)
+docker compose kill -s HUP mosquitto      # reload Mosquitto logins/ACL/cert, no disconnects
 docker compose up -d                      # start / apply compose changes
 docker compose restart caddy              # apply Caddyfile / site changes
 docker compose pull && docker compose up -d   # update images
@@ -366,7 +464,10 @@ Check the certificates from the PC: `curl.exe -vI https://rmx.lt` (Windows curl 
 
 | Undo | How |
 |---|---|
-| Stop Caddy (keep everything) | `cd /opt/rmx-vps/services && docker compose down` |
+| Stop all services (keep everything) | `cd /opt/rmx-vps/services && docker compose down` |
+| Stop only Mosquitto | `docker compose stop mosquitto` |
+| Close 8883 | `sudo ufw delete allow 8883/tcp`. Also stop Mosquitto, because Docker keeps the port open without ufw |
+| Remove Mosquitto completely | `docker compose rm -sf mosquitto`; `sudo systemctl disable --now rmx-mqtt-cert-sync.timer`; `sudo rm /etc/systemd/system/rmx-mqtt-cert-sync.* /usr/local/sbin/rmx-mqtt-cert-sync && sudo systemctl daemon-reload`; `sudo rm -rf /opt/rmx-vps/services/mosquitto/data` (logins and retained messages are lost); remove the `mqtt.rmx.lt` block from the Caddyfile and the `include` line from `services/compose.yaml` |
 | Close 80/443 | `sudo ufw delete allow 80/tcp && sudo ufw delete allow 443/tcp`. Also stop Caddy, because Docker keeps the ports open without ufw |
 | Delete Caddy's certificates and state | `sudo rm -rf /opt/rmx-vps/services/caddy/data` (after `down`) |
 | Remove Docker completely | `docker compose down`, then `sudo apt purge docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin docker-ce-rootless-extras`, `sudo rm -rf /var/lib/docker /var/lib/containerd /etc/docker /etc/apt/sources.list.d/docker.sources /etc/apt/keyrings/docker.asc`, `sudo gpasswd -d rmx docker` |
