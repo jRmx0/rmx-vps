@@ -1,0 +1,16 @@
+# Mosquitto access rules (ACL). Anything not allowed here is denied.
+# Reload after editing: docker compose kill -s HUP mosquitto
+#
+# Topics per mower (<id> = the mower's username, e.g. mower-01):
+#   mower/<id>/telemetry   mower -> server
+#   mower/<id>/status      mower -> server, retained, also the last-will ("offline")
+#   mower/<id>/cmd         server -> mower (command with ID and expiry)
+#   mower/<id>/cmd/ack     mower -> server
+
+# The backend app: every mower's topics.
+user app
+topic readwrite mower/#
+
+# Every login (each mower): only its own subtree. %u = the username,
+# so a new mower needs a login only, no change in this file.
+pattern readwrite mower/%u/#

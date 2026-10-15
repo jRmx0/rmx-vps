@@ -1,0 +1,8 @@
+[Unit]
+Description=Copy the mqtt.rmx.lt certificate from Caddy to Mosquitto
+After=docker.service
+Wants=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/rmx-mqtt-cert-sync

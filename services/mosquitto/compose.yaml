@@ -1,0 +1,29 @@
+# Mosquitto: MQTT broker for the mowers.
+# Public port 8883 (MQTT over TLS). Port 1883 (plain MQTT) is NOT published:
+# it is only reachable from containers on the rmx_edge network (the app).
+
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2.1
+    restart: unless-stopped
+    # The broker itself needs a few MB; the cap protects the 1 GB VPS.
+    mem_limit: 64m
+    ports:
+      - "8883:8883"
+    volumes:
+      # Config and ACL from this repo (no secrets in them)
+      - ./config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./config/acl:/mosquitto/config/acl:ro
+      # Server only (gitignored):
+      #   data/auth/passwd  - logins (hashed), owner 1883, mode 0600
+      #   data/certs/       - TLS cert + key, copied from Caddy by cert-sync
+      #   data/store/       - persistence (retained messages, sessions)
+      - ./data/auth:/mosquitto/auth
+      - ./data/certs:/mosquitto/certs:ro
+      - ./data/store:/mosquitto/data
+    networks:
+      - edge
+
+networks:
+  edge:
+    name: rmx_edge

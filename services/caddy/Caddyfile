@@ -23,3 +23,10 @@ api.rmx.lt {
 www.rmx.lt {
 	redir https://rmx.lt{uri} permanent
 }
+
+# MQTT broker name. Caddy only obtains and renews the TLS certificate here;
+# a host timer copies it to Mosquitto (see services/mosquitto/cert-sync/).
+# MQTT itself is on port 8883, served by Mosquitto, not by Caddy.
+mqtt.rmx.lt {
+	respond "MQTT broker: mqtts://mqtt.rmx.lt:8883 (TLS only)" 200
+}
