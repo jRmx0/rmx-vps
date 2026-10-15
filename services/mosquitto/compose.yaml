@@ -4,7 +4,7 @@
 
 services:
   mosquitto:
-    image: eclipse-mosquitto:2.1
+    image: eclipse-mosquitto:2.1-alpine
     restart: unless-stopped
     # The broker itself needs a few MB; the cap protects the 1 GB VPS.
     mem_limit: 64m
