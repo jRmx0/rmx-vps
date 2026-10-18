@@ -1,0 +1,6 @@
+# /etc/sudoers.d/deploy (root:root 0440). Install and check:
+#   sudo install -o root -g root -m 0440 sudoers-deploy /etc/sudoers.d/deploy
+#   sudo visudo -cf /etc/sudoers.d/deploy
+# The "deploy" user may run exactly one script as root, and only with an
+# argument shaped like sha-<7 hex> (sudo regex, needs sudo 1.9.10+).
+deploy ALL=(root) NOPASSWD: /usr/local/sbin/rmx-deploy-probe ^sha-[0-9a-f]{7}$

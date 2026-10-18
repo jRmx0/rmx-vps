@@ -15,8 +15,22 @@ rmx.lt {
 
 # API: placeholder until the app container exists
 api.rmx.lt {
-	header Content-Type application/json
-	respond `{"service":"rmx-api","status":"placeholder"}` 200
+	# rmx-backend-probe (Compose profile "probe"). The prefix is kept: the app
+	# serves /probe/... itself. Basic auth covers the page, REST and /probe/ws.
+	# User and bcrypt hash come from caddy/.env (server only, gitignored).
+	# When the probe is off, probe-app doesn't resolve and Caddy answers 502.
+	@probe path /probe /probe/*
+	handle @probe {
+		basic_auth {
+			{$PROBE_AUTH_USER} {$PROBE_AUTH_HASH}
+		}
+		reverse_proxy probe-app:8080
+	}
+
+	handle {
+		header Content-Type application/json
+		respond `{"service":"rmx-api","status":"placeholder"}` 200
+	}
 }
 
 # www -> bare domain (301, keeps the path)
@@ -27,6 +41,14 @@ www.rmx.lt {
 # MQTT broker name. Caddy only obtains and renews the TLS certificate here;
 # a host timer copies it to Mosquitto (see services/mosquitto/cert-sync/).
 # MQTT itself is on port 8883, served by Mosquitto, not by Caddy.
+# /mqtt: MQTT over WebSockets for browsers (wss://mqtt.rmx.lt/mqtt). Caddy
+# adds TLS and proxies to Mosquitto's internal websockets listener (9001).
 mqtt.rmx.lt {
-	respond "MQTT broker: mqtts://mqtt.rmx.lt:8883 (TLS only)" 200
+	handle /mqtt {
+		reverse_proxy mosquitto:9001
+	}
+
+	handle {
+		respond "MQTT broker: mqtts://mqtt.rmx.lt:8883 (TLS), wss://mqtt.rmx.lt/mqtt (WebSockets)" 200
+	}
 }

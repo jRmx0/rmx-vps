@@ -16,3 +16,17 @@ topic readwrite mower/#
 # Every login (each mower): only its own subtree. %u = the username,
 # so a new mower needs a login only, no change in this file.
 pattern readwrite mower/%u/#
+
+# --- rmx-backend-probe (see README §10 "Probe") ---------------------------
+# Topics: probe/req/<client-id> (browser -> server), probe/res/<client-id>
+# (server -> browser), probe/events/records, probe/status/server (retained).
+# The probe server: all of probe/.
+user probe-app
+topic readwrite probe/#
+
+# The browser (typed-in password): send requests, read the rest. Nothing else.
+user probe-web
+topic write probe/req/+
+topic read probe/res/+
+topic read probe/events/#
+topic read probe/status/#

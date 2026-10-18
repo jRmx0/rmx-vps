@@ -1,0 +1,100 @@
+# rmx-backend-probe: a learning/diagnostic app (github.com/jRmx0/rmx-backend-probe)
+# and a rehearsal of the production deploy. See README §10 "Probe".
+#
+# Compose profile "probe": OFF by default. A plain `docker compose up -d`
+# ignores these two services. Turn on / off:
+#   docker compose --profile probe up -d
+#   docker compose --profile probe stop
+#
+# Variables come from two server-only files (gitignored), wired up in
+# services/compose.yaml:
+#   probe/.env               secrets (copy .env.example, fill in)
+#   probe/deployed-tag.env   PROBE_TAG=sha-xxxxxxx, written by the deploy script
+# No ports are published: Caddy reaches probe-app over rmx_edge,
+# and only probe-app reaches probe-db over rmx_backend.
+
+services:
+  probe-db:
+    image: timescale/timescaledb:2.30.2-pg17
+    container_name: probe-db
+    profiles: [probe]
+    restart: unless-stopped
+    mem_limit: 256m
+    shm_size: 64m
+    environment:
+      POSTGRES_USER: probe
+      POSTGRES_DB: probe
+      POSTGRES_PASSWORD: ${PROBE_DB_PASSWORD:?set PROBE_DB_PASSWORD in probe/.env}
+      # Skip timescaledb-tune at first start; the settings are below.
+      NO_TS_TUNE: "true"
+    # Tuned for the 1 GB VPS: small buffers, few connections and workers.
+    command:
+      - postgres
+      - -c
+      - shared_buffers=32MB
+      - -c
+      - effective_cache_size=128MB
+      - -c
+      - work_mem=2MB
+      - -c
+      - maintenance_work_mem=16MB
+      - -c
+      - max_connections=20
+      - -c
+      - max_worker_processes=6
+      - -c
+      - max_parallel_workers=0
+      - -c
+      - max_parallel_workers_per_gather=0
+      - -c
+      - autovacuum_max_workers=2
+      - -c
+      - timescaledb.max_background_workers=3
+      - -c
+      - timescaledb.telemetry_level=off
+    volumes:
+      - ./data/db:/var/lib/postgresql/data
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U probe -d probe"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  probe-app:
+    image: ghcr.io/jrmx0/rmx-backend-probe:${PROBE_TAG:?set PROBE_TAG in probe/deployed-tag.env}
+    container_name: probe-app
+    profiles: [probe]
+    restart: unless-stopped
+    mem_limit: 64m
+    depends_on:
+      probe-db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://probe:${PROBE_DB_PASSWORD}@probe-db:5432/probe
+      MQTT_HOST: mosquitto
+      MQTT_PORT: "1883"
+      MQTT_USERNAME: probe-app
+      MQTT_PASSWORD: ${PROBE_MQTT_PASSWORD:?set PROBE_MQTT_PASSWORD in probe/.env}
+      MQTT_WS_URL: wss://mqtt.rmx.lt/mqtt
+      RUST_LOG: info
+    # Same check as the image's HEALTHCHECK (GET /probe/health), but more
+    # often, so the deploy script sees "healthy" within seconds.
+    healthcheck:
+      test: ["CMD", "/app/probe-server", "healthcheck"]
+      interval: 5s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    networks:
+      - edge
+      - backend
+
+networks:
+  edge:
+    name: rmx_edge
+  backend:
+    name: rmx_backend
+    internal: true
