@@ -16,7 +16,10 @@ services:
       - ./data/config:/config
     # Basic-auth user and hash for /probe (server only, gitignored),
     # read by the Caddyfile as {$PROBE_AUTH_USER} and {$PROBE_AUTH_HASH}.
-    env_file: .env
+    # Optional: without it the Caddyfile's fallback keeps /probe locked.
+    env_file:
+      - path: .env
+        required: false
     networks:
       - edge
 

@@ -18,11 +18,13 @@ api.rmx.lt {
 	# rmx-backend-probe (Compose profile "probe"). The prefix is kept: the app
 	# serves /probe/... itself. Basic auth covers the page, REST and /probe/ws.
 	# User and bcrypt hash come from caddy/.env (server only, gitignored).
+	# Fallback if it's missing: the hash of a random password that was thrown
+	# away, so nobody can log in (Caddy still starts; the rest keeps working).
 	# When the probe is off, probe-app doesn't resolve and Caddy answers 502.
 	@probe path /probe /probe/*
 	handle @probe {
 		basic_auth {
-			{$PROBE_AUTH_USER} {$PROBE_AUTH_HASH}
+			{$PROBE_AUTH_USER:probe} {$PROBE_AUTH_HASH:$2a$14$d3nPuORWeqGZ7GFNTW0XLu3B/fyAkquEYiJvI3kFjMp.EbGC84wnS}
 		}
 		reverse_proxy probe-app:8080
 	}

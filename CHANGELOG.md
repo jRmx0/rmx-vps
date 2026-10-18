@@ -4,6 +4,40 @@ Newest entries at the top. Times in UTC. For each change, record **what**, **why
 
 ---
 
+## 2026-10-18 — rmx-backend-probe deployed, with auto-deploy
+
+*Why:* the probe (github.com/jRmx0/rmx-backend-probe) rehearses the whole production workflow: a Rust app plus a TimescaleDB container, routes behind Caddy, browser MQTT over WebSockets, and auto-deploy from GitHub Actions on merge to `main`. This setup will be copied for the production app.
+
+### Probe containers (Compose profile `probe`)
+- New `services/probe/compose.yaml`, included from `services/compose.yaml`. Its variables (passwords and `PROBE_TAG`, the deployed image) come from `probe/.env` (server only), which Compose reads automatically next to the included file. It's optional, and there are no `${VAR:?}` checks, so a missing file breaks only the probe, not Caddy or Mosquitto.
+- `probe-db`: `timescale/timescaledb:2.30.2-pg17`, `rmx_backend` only, no ports, `mem_limit 256m`, tuned for 1 GB (`shared_buffers=32MB`, `work_mem=2MB`, `max_connections=20`, no parallel workers, 3 TimescaleDB background workers, telemetry off), health check `pg_isready`. Data in `probe/data/db/`.
+- `probe-app`: `ghcr.io/jrmx0/rmx-backend-probe:sha-…`, `rmx_edge` + `rmx_backend`, no ports, `mem_limit 64m`, starts after the DB is healthy. Running: DB ~60 MB, app ~8 MB.
+- Profile `probe`: a plain `docker compose up -d` doesn't start it. Stop it with `docker compose stop probe-app probe-db`. (Found the hard way: `docker compose --profile probe stop` without names stops Caddy and Mosquitto too; about a minute of downtime, restarted with `docker compose up -d`.)
+
+### Mosquitto
+- New logins `probe-app` (`probe/#`) and `probe-web` (write `probe/req/+`; read `probe/res/+`, `probe/events/#`, `probe/status/#`), random 32-character passwords in `data/credentials.txt`.
+- New listener **9001** `protocol websockets`, not published, for browsers through Caddy. `use_username_as_clientid` stays on 8883 only (it is per listener), so several probe tabs can share the `probe-web` login. Known limit: client IDs are shared across listeners (README §10).
+- `tests/mqtt-tests.ps1`: the client-ID test filtered the server log with `grep` inside a double-quoted remote command, which Windows PowerShell 5.1 mangles. It now filters locally. 12/12 pass in PowerShell 5.1 and 7.
+
+### Caddy
+- `api.rmx.lt`: `/probe` and `/probe/*` → `probe-app:8080` (prefix kept) behind `basic_auth` (user `probe`). The hash comes from `caddy/.env` (server only) via an optional `env_file`; template `caddy/.env.example`. Without it, the Caddyfile falls back to the hash of a random password that was thrown away, so `/probe` stays locked and Caddy still starts. Probe off → 502.
+- `mqtt.rmx.lt`: `/mqtt` → `mosquitto:9001` (WebSockets); everything else still answers the one-line text, so the 8883 certificate keeps renewing.
+
+### Auto-deploy
+- New user `deploy` (no password, not in `sudo`/`docker`), one SSH key with `restrict,command="sudo -n /usr/local/sbin/rmx-deploy-probe \"$SSH_ORIGINAL_COMMAND\""`.
+- `/etc/sudoers.d/deploy`: that script only, argument `^sha-[0-9a-f]{7}$` only. Checked with `visudo -cf` before installing, then `visudo -c`.
+- `/usr/local/sbin/rmx-deploy-probe` (source `services/probe/deploy/rmx-deploy-probe.sh`): validate, lock, pull, write the tag, recreate `probe-app`, wait for healthy, roll back on failure, log to `/var/log/rmx-deploy-probe.log` and the journal.
+- Tested from the PC with the deploy key: shell commands, `;` injection, no command and port forwarding refused; unknown tag → nothing changed; older tag → deployed; rollback with the DB stopped → previous tag restored, exit 1.
+- GitHub secrets `DEPLOY_HOST`, `DEPLOY_SSH_KEY`, `DEPLOY_KNOWN_HOSTS` set on rmx-backend-probe; no copy of the private key is kept anywhere else.
+
+### Tested end to end (from the PC)
+- `/probe/health` ok (db and mqtt true), basic auth required (401 without), `/probe` → 308 `/probe/`, `/probe/config.json` gives `wss://mqtt.rmx.lt/mqtt`.
+- Scripted: REST create, WSS create + live event, MQTT over WSS as `probe-web` with two client IDs at once, responses only to the asking client, events to both, forged events and `mower/#` blocked by the ACL.
+- TimescaleDB: `record_events` is a hypertable with compression and retention policies; events from https, wss and mqtt are logged.
+
+### Undo
+- README §10 → Probe → Remove. Backups: none (by choice).
+
 ## 2026-10-15 — Mosquitto: MQTT over TLS on mqtt.rmx.lt:8883
 
 *Why:* Phase 3. The mowers need a broker for telemetry, status and commands. It needs TLS and a login, and each mower may use only its own topics.

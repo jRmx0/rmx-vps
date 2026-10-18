@@ -113,7 +113,11 @@ Result 'wrong password refused' ("$out" -match 'not authori|refused|bad user') "
 $j = Start-Sub ($m1 + @('-i', 'first')) 'mower/mower-01/cmd'
 & $pub @tls @m1 -i 'second' -t 'mower/mower-01/telemetry' -m 'x' 2>&1 | Out-Null
 $null = Stop-Sub $j 3
-$log = ssh -o BatchMode=yes rmx-vps 'docker logs --since 30s rmx-mosquitto-1 2>&1 | grep -iE "already connected|closing old|session taken over" | tail -n 2 | sed -E "s/[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+/PC-IP/g"'
+# Filtered here, not with grep on the server: Windows PowerShell 5.1 mangles
+# double quotes inside native-command arguments.
+$log = ssh -o BatchMode=yes rmx-vps 'docker logs --since 30s rmx-mosquitto-1 2>&1' |
+    Select-String -Pattern 'already connected|closing old|session taken over' |
+    Select-Object -Last 2 | ForEach-Object { $_.Line -replace '\d+\.\d+\.\d+\.\d+', 'PC-IP' }
 Result 'client ID forced to username' ("$log" -match 'mower-01') "server log: $log"
 
 # 10. Plain MQTT port 1883 not reachable from the internet

@@ -317,14 +317,19 @@ services/
 │   ├── Caddyfile         # sites, TLS, redirects
 │   ├── site/index.html   # placeholder page for rmx.lt
 │   └── data/             # (server only, gitignored) certificates + Caddy state
-└── mosquitto/
-    ├── compose.yaml      # Mosquitto container
-    ├── config/
-    │   ├── mosquitto.conf  # listeners, TLS, logins, persistence
-    │   └── acl             # access rules (source; Mosquitto reads an installed copy)
-    ├── cert-sync/        # host script + systemd timer: Caddy's cert -> Mosquitto
-    ├── tests/mqtt-tests.ps1  # test suite, run from the Windows PC
-    └── data/             # (server only, gitignored) logins, cert copy, persistence
+├── mosquitto/
+│   ├── compose.yaml      # Mosquitto container
+│   ├── config/
+│   │   ├── mosquitto.conf  # listeners, TLS, logins, persistence
+│   │   └── acl             # access rules (source; Mosquitto reads an installed copy)
+│   ├── cert-sync/        # host script + systemd timer: Caddy's cert -> Mosquitto
+│   ├── tests/mqtt-tests.ps1  # test suite, run from the Windows PC
+│   └── data/             # (server only, gitignored) logins, cert copy, persistence
+└── probe/                # rmx-backend-probe, Compose profile "probe" (off unless started)
+    ├── compose.yaml      # probe-db (TimescaleDB) + probe-app (GHCR image)
+    ├── .env.example      # template for .env (server only: passwords + PROBE_TAG, the deployed image)
+    ├── deploy/           # deploy script, sudoers rule, authorized_keys template
+    └── data/             # (server only, gitignored) database files, credentials.txt
 ```
 
 - Per-service secrets go in `services/<name>/.env` (gitignored). Commit a `.env.example` with placeholder values next to it.
@@ -334,8 +339,8 @@ services/
 
 | Network | Docker name | Members | Notes |
 |---|---|---|---|
-| `edge` | `rmx_edge` | Caddy, Mosquitto (later app) | Normal bridge with internet access |
-| `backend` | `rmx_backend` | (later app, database) | `internal: true`: no internet access. Created when the first service uses it |
+| `edge` | `rmx_edge` | Caddy, Mosquitto, probe-app (later app) | Normal bridge with internet access |
+| `backend` | `rmx_backend` | probe-app, probe-db (later app, database) | `internal: true`: no internet access. Created when the first service uses it |
 
 ### Public ports
 
@@ -346,16 +351,16 @@ services/
 | 443/tcp | Caddy | ✅ | HTTPS (HTTP/1.1 + HTTP/2). HTTP/3 is turned off, so 443/udp stays closed |
 | 8883/tcp | Mosquitto | ✅ | MQTT over TLS (`mqtt.rmx.lt`), login required |
 
-Not public: Mosquitto's plain MQTT port **1883** is not published. Only containers on `rmx_edge` (the app, later) can reach it, as `mosquitto:1883`.
+Not public (reachable only by containers on `rmx_edge`): Mosquitto's plain MQTT **1883** (`mosquitto:1883`, the app) and its WebSocket listener **9001** (`mosquitto:9001`, only via Caddy at `wss://mqtt.rmx.lt/mqtt`); probe-app's **8080** (only via Caddy at `https://api.rmx.lt/probe/`). probe-db's 5432 is on `rmx_backend` only.
 
 ### Caddy
 
 - Image `caddy:2.11` (2.11.7 when installed); container `rmx-caddy-1`.
 - Sites:
   - `https://rmx.lt`: static placeholder page from `site/`
-  - `https://api.rmx.lt`: placeholder JSON `{"service":"rmx-api","status":"placeholder"}`
+  - `https://api.rmx.lt`: placeholder JSON `{"service":"rmx-api","status":"placeholder"}`, except `/probe` and `/probe/*` → probe-app:8080 (prefix kept) behind **basic auth** (see [Probe](#probe-rmx-backend-probe)). When the probe is off, `/probe/*` answers 502 (after the password)
   - `https://www.rmx.lt/…` → **301** to `https://rmx.lt/…`
-  - `https://mqtt.rmx.lt`: a one-line text. The block exists so that Caddy obtains and renews the certificate Mosquitto uses (see [Mosquitto](#mosquitto-mqtt))
+  - `https://mqtt.rmx.lt`: a one-line text. The block exists so that Caddy obtains and renews the certificate Mosquitto uses (see [Mosquitto](#mosquitto-mqtt)). `wss://mqtt.rmx.lt/mqtt` → Mosquitto's WebSocket listener (`mosquitto:9001`) for browsers
   - every `http://…` → **308** to `https://…`
 - Certificates: Let's Encrypt (issuers `YE1`/`YE2`), one per name, obtained automatically on first start (2026-10-15, valid until 2027-01-13). Caddy renews them about 30 days before they expire. No ACME email is set (Let's Encrypt no longer sends expiry emails, and an email would end up in this public repo).
 - State: `services/caddy/data/data` → `/data` (certs, ACME account key) and `services/caddy/data/config` → `/config`. If these are deleted, Caddy just requests new certificates. Let's Encrypt allows 5 duplicate certificates per week, so don't delete them in a loop.
@@ -366,8 +371,10 @@ Not public: Mosquitto's plain MQTT port **1883** is not published. Only containe
 - Listeners ([`config/mosquitto.conf`](services/mosquitto/config/mosquitto.conf)):
   - **8883**: MQTT over TLS, TLS 1.2 minimum (1.3 preferred), certificate for `mqtt.rmx.lt`. Published.
   - **1883**: plain MQTT for containers on `rmx_edge` (the app). Not published.
-  - Both: `allow_anonymous false`, logins from `data/auth/passwd`, rules from `data/auth/acl`.
+  - **9001**: MQTT over WebSockets (plain), for browsers through Caddy (`wss://mqtt.rmx.lt/mqtt`; Caddy adds TLS). Not published.
+  - All: `allow_anonymous false`, logins from `data/auth/passwd`, rules from `data/auth/acl`.
 - On 8883, `use_username_as_clientid true`: the client ID is always the username. A second login as `mower-01` replaces the first (the broker logs "session taken over"), so one device can't kick another off by copying its client ID.
+- On 9001 (WebSockets) it is **off**, because each browser tab of the probe page connects as `probe-web` with its own client ID `web-<hex>`. The option is per listener in Mosquitto 2.1; the 8883 test suite still passes 12/12. ⚠️ Client IDs are shared across listeners, so whoever knows the `probe-web` password could connect over WebSockets with the client ID `mower-01` and kick that mower off. Acceptable for the probe; production browsers will need a different scheme (e.g. the app as the only MQTT client, or a plugin that enforces a client-ID prefix).
 - Persistence on (`data/store/mosquitto.db`, saved every 5 min and on shutdown): retained messages and persistent sessions survive restarts.
 - Logs go to stdout: `docker compose logs -f mosquitto`. They contain client IP addresses, so don't paste them into this repo.
 
@@ -377,8 +384,10 @@ Not public: Mosquitto's plain MQTT port **1883** is not published. Only containe
 |---|---|---|
 | `app` | `mower/#` (read + write) | The backend app (Phase 5) |
 | `mower-01` | `mower/mower-01/#` only | First mower |
+| `probe-app` | `probe/#` (read + write) | rmx-backend-probe server |
+| `probe-web` | write `probe/req/+`; read `probe/res/+`, `probe/events/#`, `probe/status/#` | The probe web page (password typed in) |
 
-The rule in [`config/acl`](services/mosquitto/config/acl): every login gets `mower/<its username>/#` (`pattern readwrite mower/%u/#`). A new mower needs a login only, no ACL change. Planned topics: `mower/<id>/telemetry`, `mower/<id>/status` (retained, also the last-will), `mower/<id>/cmd`, `mower/<id>/cmd/ack`.
+The rules in [`config/acl`](services/mosquitto/config/acl): `probe-app` and `probe-web` have explicit `user` entries; every login also gets `mower/<its username>/#` (`pattern readwrite mower/%u/#`). A new mower needs a login only, no ACL change. Planned topics: `mower/<id>/telemetry`, `mower/<id>/status` (retained, also the last-will), `mower/<id>/cmd`, `mower/<id>/cmd/ack`.
 
 How Mosquitto enforces it: a mower may **subscribe** to another mower's topic (the SUBSCRIBE is accepted), but no message from there is ever delivered to it. A **publish** to another mower's topic is dropped; with MQTT 5 and QoS 1 the client is told `Not authorized`.
 
@@ -441,7 +450,7 @@ The test suite checks the TLS chain, that TLS 1.1 is refused, that the own topic
 powershell -ExecutionPolicy Bypass -File services\mosquitto\tests\mqtt-tests.ps1
 ```
 
-All 12 tests passed on 2026-10-15.
+All 12 tests passed on 2026-10-15, and again on 2026-10-18 after the WebSocket listener was added (in both Windows PowerShell 5.1 and PowerShell 7).
 
 ### Everyday commands (on the server)
 
@@ -453,12 +462,100 @@ docker compose logs -f mosquitto          # follow Mosquitto logs (connections, 
 docker compose kill -s HUP mosquitto      # reload Mosquitto logins/ACL/cert, no disconnects
 docker compose up -d                      # start / apply compose changes
 docker compose restart caddy              # apply Caddyfile / site changes
-docker compose pull && docker compose up -d   # update images
+docker compose pull && docker compose up -d   # update images (not the probe, see Probe)
 ```
+
+> ⚠️ `docker compose --profile probe stop` / `down` with no service names stops **everything** (Caddy and Mosquitto too). To stop only the probe, name its services (below).
 
 Deploy a change made on the PC: commit + push, then `ssh rmx-vps 'git -C /opt/rmx-vps pull --ff-only'`, then run the matching command above. A changed `compose.yaml` needs `up -d`. A changed `Caddyfile` needs `restart caddy`: git replaces the file, and the container keeps seeing the old one until it restarts.
 
 Check the certificates from the PC: `curl.exe -vI https://rmx.lt` (Windows curl verifies the chain and fails loudly if it's bad).
+
+### Probe (rmx-backend-probe)
+
+[rmx-backend-probe](https://github.com/jRmx0/rmx-backend-probe) is a learning/diagnostic app and a full rehearsal of the production workflow: a Rust server plus a React page with a live table, CRUD over HTTPS REST, WSS and MQTT over WSS, logged to TimescaleDB. Its README section "Deployment" is the contract this setup follows. The deploy setup below will be copied for the production app.
+
+**Containers** ([`services/probe/compose.yaml`](services/probe/compose.yaml)), Compose profile `probe`, so a plain `docker compose up -d` leaves them alone:
+
+| Container | Image | Networks | Memory | Notes |
+|---|---|---|---|---|
+| `probe-db` | `timescale/timescaledb:2.30.2-pg17` | `rmx_backend` | `mem_limit 256m` (~60 MB used) | No ports. Tuned small: `shared_buffers=32MB`, `work_mem=2MB`, `max_connections=20`, no parallel workers, `timescaledb.max_background_workers=3`, `timescaledb.telemetry_level=off`. Data in `probe/data/db/` |
+| `probe-app` | `ghcr.io/jrmx0/rmx-backend-probe:${PROBE_TAG}` | `rmx_edge` + `rmx_backend` | `mem_limit 64m` (~8 MB used) | No ports; Caddy proxies to `probe-app:8080`. Health check every 5 s (`/probe/health`) |
+
+The whole probe uses about 50–70 MB of RAM while running (measured 2026-10-18: ~50 MB more "available" after stopping it).
+
+**Where the values come from** (all server only, gitignored). Compose reads `probe/.env` automatically for the included `probe/compose.yaml`, because it sits next to it. Both `.env` files are optional: if one is missing, only the probe fails (Caddy then keeps `/probe` locked with a fallback hash whose password was thrown away), and the rest of the stack keeps working. That's also why the compose files use no `${VAR:?}` checks: Compose checks those even for services whose profile is off.
+
+| File | Owner / mode | Contents |
+|---|---|---|
+| `probe/.env` | rmx, `0600` | `PROBE_DB_PASSWORD`, `PROBE_MQTT_PASSWORD`, and `PROBE_TAG=sha-…`, the deployed image (template: [`.env.example`](services/probe/.env.example)). **Only the deploy script changes `PROBE_TAG`**: a deploy is just "rewrite that line + recreate probe-app". rmx owns the file because `docker compose` (run as rmx) must read it |
+| `probe/data/credentials.txt` | root, `0600` | Plain-text copies: basic-auth password (user `probe`), DB password |
+| `caddy/.env` | rmx, `0600` | `PROBE_AUTH_USER`, `PROBE_AUTH_HASH` (bcrypt) for Caddy's basic auth (template: [`caddy/.env.example`](services/caddy/.env.example)) |
+| `mosquitto/data/credentials.txt` | root, `0600` | Also holds `probe-app` and `probe-web` |
+
+The bcrypt hash stays on the server too: a strong random password makes it practically uncrackable, but there's no reason to publish it.
+
+**Routes**
+
+| URL | Goes to | Login |
+|---|---|---|
+| `https://api.rmx.lt/probe/` | probe-app (page, `/probe/api/records`, `/probe/ws`, `/probe/config.json`) | Basic auth, user `probe` |
+| `https://api.rmx.lt/probe/health` | probe-app health JSON (200 / 503) | Basic auth |
+| `wss://mqtt.rmx.lt/mqtt` | Mosquitto 9001 | MQTT login `probe-web` (typed into the page) |
+
+**Passwords** (read them on the server; never paste them into the repo or a chat):
+
+```bash
+sudo cat /opt/rmx-vps/services/probe/data/credentials.txt          # basic-auth (user probe)
+sudo awk '/^probe-web /{print $2}' /opt/rmx-vps/services/mosquitto/data/credentials.txt   # MQTT login for the page
+```
+
+**Turn on / off** (on the server, in `/opt/rmx-vps/services`):
+
+```bash
+docker compose --profile probe up -d           # start (or apply compose changes)
+docker compose stop probe-app probe-db         # stop only the probe (frees ~50-70 MB)
+docker compose ps -a probe-app probe-db        # state
+docker compose logs -f probe-app               # logs
+```
+
+⚠️ Don't use `docker compose --profile probe stop` or `down` without service names: that stops Caddy and Mosquitto too.
+
+#### Auto-deploy (CD)
+
+Every push to `main` in rmx-backend-probe runs CI. After the image is pushed to GHCR, the `deploy` job sends **only the tag** over SSH:
+
+```
+GitHub Actions --ssh deploy@45.81.252.43 "sha-1234abc"--> forced command
+  sudo -n /usr/local/sbin/rmx-deploy-probe "sha-1234abc"   (root, via sudoers)
+```
+
+- **User `deploy`** (uid 1001): no password (locked), not in `sudo` or `docker`. Its shell is `/bin/bash` only because sshd runs forced commands through the login shell; it never gets an interactive shell.
+- **`/home/deploy/.ssh/authorized_keys`**: one key with `restrict,command="sudo -n /usr/local/sbin/rmx-deploy-probe \"$SSH_ORIGINAL_COMMAND\""` (template: [`deploy/authorized_keys.example`](services/probe/deploy/authorized_keys.example)). `restrict` blocks the terminal and all forwarding; `command` replaces whatever the client asks to run. Tested: `id`, `sha-…; id`, no command and `-L` port forwarding are all refused.
+- **`/etc/sudoers.d/deploy`** ([source](services/probe/deploy/sudoers-deploy)): `deploy` may run that one script as root, and only with an argument matching `^sha-[0-9a-f]{7}$`. Anything else is refused by sudo before the script runs ("a password is required").
+- **`/usr/local/sbin/rmx-deploy-probe`** ([source](services/probe/deploy/rmx-deploy-probe.sh)): checks the tag again, takes a lock (one deploy at a time), pulls the image (a failed pull changes nothing), rewrites the `PROBE_TAG` line in `probe/.env` (atomically, keeping owner and mode), recreates `probe-app` and waits up to 90 s for `healthy`. If it isn't healthy, it writes the previous tag back, recreates again and exits 1, so the GitHub job fails. Old probe images are pruned after a good deploy. If the probe is **off**, it only records and pulls the tag; a deploy never turns the probe on. Tested: good deploy, unknown tag, and a rollback (DB stopped on purpose).
+- **Log**: `/var/log/rmx-deploy-probe.log` (root:adm) and the journal: `sudo journalctl -t rmx-deploy-probe`.
+- **Deploy by hand** (as rmx): `sudo rmx-deploy-probe sha-1234abc`. Roll back the same way, with an older tag.
+- **GitHub side** (rmx-backend-probe → Settings → Secrets and variables → Actions): `DEPLOY_HOST` (`45.81.252.43`), `DEPLOY_SSH_KEY` (private key, exists only there), `DEPLOY_KNOWN_HOSTS` (this server's ed25519 host-key line, pinned: fingerprint in the table at the top). The job retries up to 3 times on SSH connection errors only (exit 255): new SSH connections to this VPS are sometimes dropped before they reach sshd.
+
+**Rotate the deploy key** (from the Windows PC, in Git Bash, because PowerShell can't pass an empty passphrase to ssh-keygen):
+
+```bash
+ssh-keygen -t ed25519 -N "" -C rmx-backend-probe-deploy -f ./deploy_key
+gh secret set DEPLOY_SSH_KEY -R jRmx0/rmx-backend-probe < ./deploy_key
+```
+
+Then on the server, replace the key part of the one line in `/home/deploy/.ssh/authorized_keys` (keep the `restrict,command=…` prefix) with the content of `deploy_key.pub`, and delete both local files. The old key stops working as soon as the line is replaced.
+
+**If the server's host key ever changes:** `DEPLOY_KNOWN_HOSTS` must be updated (`echo "45.81.252.43 $(cut -d' ' -f1,2 /etc/ssh/ssh_host_ed25519_key.pub)"`), or every deploy fails with a host-key error. That is on purpose.
+
+#### Remove
+
+- Stop and delete the containers: `docker compose rm -sf probe-app probe-db`; the data: `sudo rm -rf probe/data` (no backup, by choice).
+- Deploy access: `sudo rm /etc/sudoers.d/deploy /usr/local/sbin/rmx-deploy-probe && sudo userdel -r deploy`; delete the three `DEPLOY_*` secrets on GitHub (and disable the `deploy` job).
+- MQTT: `mosquitto_passwd -D` for `probe-app` and `probe-web` (see above), remove their lines from `credentials.txt` and the probe block from `config/acl`; remove the 9001 listener from `mosquitto.conf`.
+- Caddy: remove the `@probe` handle and `/mqtt` handle, `env_file` and `caddy/.env`.
+- Remove the `probe/compose.yaml` include from `services/compose.yaml`.
 
 ### Undo
 
@@ -469,5 +566,6 @@ Check the certificates from the PC: `curl.exe -vI https://rmx.lt` (Windows curl 
 | Close 8883 | `sudo ufw delete allow 8883/tcp`. Also stop Mosquitto, because Docker keeps the port open without ufw |
 | Remove Mosquitto completely | `docker compose rm -sf mosquitto`; `sudo systemctl disable --now rmx-mqtt-cert-sync.timer`; `sudo rm /etc/systemd/system/rmx-mqtt-cert-sync.* /usr/local/sbin/rmx-mqtt-cert-sync && sudo systemctl daemon-reload`; `sudo rm -rf /opt/rmx-vps/services/mosquitto/data` (logins and retained messages are lost); remove the `mqtt.rmx.lt` block from the Caddyfile and the `include` line from `services/compose.yaml` |
 | Close 80/443 | `sudo ufw delete allow 80/tcp && sudo ufw delete allow 443/tcp`. Also stop Caddy, because Docker keeps the ports open without ufw |
+| Remove the probe completely | See [Probe → Remove](#remove) |
 | Delete Caddy's certificates and state | `sudo rm -rf /opt/rmx-vps/services/caddy/data` (after `down`) |
 | Remove Docker completely | `docker compose down`, then `sudo apt purge docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin docker-ce-rootless-extras`, `sudo rm -rf /var/lib/docker /var/lib/containerd /etc/docker /etc/apt/sources.list.d/docker.sources /etc/apt/keyrings/docker.asc`, `sudo gpasswd -d rmx docker` |

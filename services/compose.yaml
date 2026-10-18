@@ -15,12 +15,11 @@ name: rmx
 include:
   - caddy/compose.yaml
   - mosquitto/compose.yaml
-  # Profile "probe" (off by default), see probe/compose.yaml.
-  # Both env files are server only (gitignored).
-  - path: probe/compose.yaml
-    env_file:
-      - probe/.env
-      - probe/deployed-tag.env
+  # Profile "probe" (off by default), see probe/compose.yaml. Its variables
+  # come from probe/.env (server only), which Compose reads automatically
+  # because it sits next to the included file. It's optional: without it,
+  # only the probe fails to start.
+  - probe/compose.yaml
 
 networks:
   # Public-facing services: Caddy, Mosquitto, app

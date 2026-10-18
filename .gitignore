@@ -24,5 +24,3 @@ desktop.ini
 # Docker services: secrets and runtime data stay on the server
 !.env.example
 services/*/data/
-# Written by the deploy script on the server (the deployed image tag)
-services/probe/deployed-tag.env

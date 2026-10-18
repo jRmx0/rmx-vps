@@ -4,12 +4,14 @@
 # Compose profile "probe": OFF by default. A plain `docker compose up -d`
 # ignores these two services. Turn on / off:
 #   docker compose --profile probe up -d
-#   docker compose --profile probe stop
+#   docker compose stop probe-app probe-db
+# (Not `--profile probe stop` without names: that stops Caddy and Mosquitto too.)
 #
-# Variables come from two server-only files (gitignored), wired up in
-# services/compose.yaml:
-#   probe/.env               secrets (copy .env.example, fill in)
-#   probe/deployed-tag.env   PROBE_TAG=sha-xxxxxxx, written by the deploy script
+# Variables come from probe/.env (server only, gitignored; template
+# .env.example), read automatically for this included file: the passwords,
+# and PROBE_TAG=sha-xxxxxxx, the deployed image, rewritten by the deploy
+# script. No ${VAR:?} checks: they would break `docker compose` for the
+# whole stack (Caddy, Mosquitto) whenever the file is missing.
 # No ports are published: Caddy reaches probe-app over rmx_edge,
 # and only probe-app reaches probe-db over rmx_backend.
 
@@ -24,7 +26,7 @@ services:
     environment:
       POSTGRES_USER: probe
       POSTGRES_DB: probe
-      POSTGRES_PASSWORD: ${PROBE_DB_PASSWORD:?set PROBE_DB_PASSWORD in probe/.env}
+      POSTGRES_PASSWORD: ${PROBE_DB_PASSWORD}
       # Skip timescaledb-tune at first start; the settings are below.
       NO_TS_TUNE: "true"
     # Tuned for the 1 GB VPS: small buffers, few connections and workers.
@@ -64,7 +66,7 @@ services:
       start_period: 30s
 
   probe-app:
-    image: ghcr.io/jrmx0/rmx-backend-probe:${PROBE_TAG:?set PROBE_TAG in probe/deployed-tag.env}
+    image: ghcr.io/jrmx0/rmx-backend-probe:${PROBE_TAG}
     container_name: probe-app
     profiles: [probe]
     restart: unless-stopped
@@ -77,7 +79,7 @@ services:
       MQTT_HOST: mosquitto
       MQTT_PORT: "1883"
       MQTT_USERNAME: probe-app
-      MQTT_PASSWORD: ${PROBE_MQTT_PASSWORD:?set PROBE_MQTT_PASSWORD in probe/.env}
+      MQTT_PASSWORD: ${PROBE_MQTT_PASSWORD}
       MQTT_WS_URL: wss://mqtt.rmx.lt/mqtt
       RUST_LOG: info
     # Same check as the image's HEALTHCHECK (GET /probe/health), but more

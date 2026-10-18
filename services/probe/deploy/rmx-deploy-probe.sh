@@ -8,7 +8,7 @@
 #   ssh deploy@45.81.252.43 sha-1234abc
 # By hand (as rmx): sudo rmx-deploy-probe sha-1234abc
 #
-# Steps: validate the tag -> write it to probe/deployed-tag.env -> pull ->
+# Steps: validate the tag -> pull -> rewrite PROBE_TAG in probe/.env ->
 # if the probe is running, recreate probe-app and wait for "healthy";
 # if it isn't healthy in time, put the previous tag back and fail.
 # If the probe is off (profile stopped), only record and pull the tag:
@@ -17,7 +17,8 @@ set -euo pipefail
 umask 077
 
 SERVICES=/opt/rmx-vps/services
-TAG_FILE=$SERVICES/probe/deployed-tag.env
+# Holds the passwords and PROBE_TAG; only the PROBE_TAG line is rewritten.
+ENV_FILE=$SERVICES/probe/.env
 IMAGE=ghcr.io/jrmx0/rmx-backend-probe
 LOG=/var/log/rmx-deploy-probe.log
 HEALTH_TIMEOUT=90
@@ -45,16 +46,22 @@ flock -w 300 9 || { log "REFUSED $TAG: another deploy is still running"; exit 3;
 cd "$SERVICES"
 compose() { docker compose --profile probe "$@"; }
 
-PREV=""
-if [[ -f $TAG_FILE ]]; then
-	PREV=$(sed -n 's/^PROBE_TAG=\(sha-[0-9a-f]\{7\}\)$/\1/p' "$TAG_FILE")
+if [[ ! -f $ENV_FILE ]]; then
+	log "REFUSED $TAG: $ENV_FILE is missing (see README §10 Probe)"
+	exit 1
 fi
+PREV=$(sed -n 's/^PROBE_TAG=\(sha-[0-9a-f]\{7\}\)$/\1/p' "$ENV_FILE")
 
+# Replace only the PROBE_TAG line, atomically, keeping the file's owner and
+# mode (rmx 0600: rmx's own `docker compose` reads it).
 write_tag() {
-	printf 'PROBE_TAG=%s\n' "$1" >"$TAG_FILE.tmp"
-	# Not a secret, and rmx's own `docker compose` must be able to read it.
-	chmod 0644 "$TAG_FILE.tmp"
-	mv "$TAG_FILE.tmp" "$TAG_FILE"
+	local tmp
+	tmp=$(mktemp "$ENV_FILE.XXXXXX")
+	grep -v '^PROBE_TAG=' "$ENV_FILE" >"$tmp" || true
+	printf 'PROBE_TAG=%s\n' "$1" >>"$tmp"
+	chown --reference="$ENV_FILE" "$tmp"
+	chmod --reference="$ENV_FILE" "$tmp"
+	mv "$tmp" "$ENV_FILE"
 }
 
 wait_healthy() {
