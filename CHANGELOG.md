@@ -4,6 +4,12 @@ Newest entries at the top. Times in UTC. For each change, record **what**, **why
 
 ---
 
+## 2026-10-18 — Probe off by default
+
+- After the end-to-end test (auto-deploy verified: merging rmx-backend-probe PR #5 deployed `sha-3402713` by itself), the probe was stopped with `docker compose stop probe-app probe-db`, and **off** is now the default.
+- *Why:* it's a learning tool, and the 1 GB VPS keeps ~50–70 MB more free when it's off. Deploys still run while it's off: the script records and pulls the tag but doesn't start anything.
+- Undo / use it: `docker compose --profile probe up -d` (README §10 → Probe).
+
 ## 2026-10-18 — rmx-backend-probe deployed, with auto-deploy
 
 *Why:* the probe (github.com/jRmx0/rmx-backend-probe) rehearses the whole production workflow: a Rust app plus a TimescaleDB container, routes behind Caddy, browser MQTT over WebSockets, and auto-deploy from GitHub Actions on merge to `main`. This setup will be copied for the production app.
