@@ -16,16 +16,33 @@ rmx.lt {
 # API: placeholder until the app container exists
 api.rmx.lt {
 	# rmx-backend-probe (Compose profile "probe"). The prefix is kept: the app
-	# serves /probe/... itself. Basic auth covers the page, REST and /probe/ws.
+	# serves /probe/... itself. Basic auth covers the page, REST and /probe/ws
+	# (for /probe/ws a cookie set after login also works, see below).
 	# User and bcrypt hash come from caddy/.env (server only, gitignored).
 	# Fallback if it's missing: the hash of a random password that was thrown
 	# away, so nobody can log in (Caddy still starts; the rest keeps working).
 	# When the probe is off, probe-app doesn't resolve and Caddy answers 502.
+	#
+	# WebSocket on iOS: WebKit (Safari, and Chrome/Firefox on iPhone) does not
+	# send basic-auth credentials on WebSocket handshakes, so /probe/ws got 401
+	# in a loop. Browsers do send cookies there, so after a basic-auth login
+	# Caddy sets probe_ws=<token>, and /probe/ws is also allowed with exactly
+	# that cookie. PROBE_WS_TOKEN comes from caddy/.env; if it's missing or
+	# shorter than 32 characters, the cookie path is off (fails closed).
+	@probe_ws_cookie {
+		path /probe/ws
+		expression `{http.request.cookie.probe_ws} == "{$PROBE_WS_TOKEN}" && size("{$PROBE_WS_TOKEN}") >= 32`
+	}
+	handle @probe_ws_cookie {
+		reverse_proxy probe-app:8080
+	}
+
 	@probe path /probe /probe/*
 	handle @probe {
 		basic_auth {
 			{$PROBE_AUTH_USER:probe} {$PROBE_AUTH_HASH:$2a$14$d3nPuORWeqGZ7GFNTW0XLu3B/fyAkquEYiJvI3kFjMp.EbGC84wnS}
 		}
+		header Set-Cookie "probe_ws={$PROBE_WS_TOKEN}; Path=/probe/ws; Max-Age=86400; Secure; HttpOnly; SameSite=Strict"
 		reverse_proxy probe-app:8080
 	}
 
