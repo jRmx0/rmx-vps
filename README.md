@@ -484,13 +484,15 @@ Check the certificates from the PC: `curl.exe -vI https://rmx.lt` (Windows curl 
 
 The whole probe uses about 50–70 MB of RAM while running (measured 2026-10-18: ~50 MB more "available" after stopping it).
 
+> **The probe is OFF by default** (decided 2026-10-18). Turn it on when you want to use it, and off again afterwards. Auto-deploys keep working while it's off: they only record the new tag in `probe/.env` and pull the image, so the next `up -d` starts the latest version. Containers that are stopped stay stopped after a reboot (`restart: unless-stopped`).
+
 **Where the values come from** (all server only, gitignored). Compose reads `probe/.env` automatically for the included `probe/compose.yaml`, because it sits next to it. Both `.env` files are optional: if one is missing, only the probe fails (Caddy then keeps `/probe` locked with a fallback hash whose password was thrown away), and the rest of the stack keeps working. That's also why the compose files use no `${VAR:?}` checks: Compose checks those even for services whose profile is off.
 
 | File | Owner / mode | Contents |
 |---|---|---|
 | `probe/.env` | rmx, `0600` | `PROBE_DB_PASSWORD`, `PROBE_MQTT_PASSWORD`, and `PROBE_TAG=sha-…`, the deployed image (template: [`.env.example`](services/probe/.env.example)). **Only the deploy script changes `PROBE_TAG`**: a deploy is just "rewrite that line + recreate probe-app". rmx owns the file because `docker compose` (run as rmx) must read it |
 | `probe/data/credentials.txt` | root, `0600` | Plain-text copies: basic-auth password (user `probe`), DB password |
-| `caddy/.env` | rmx, `0600` | `PROBE_AUTH_USER`, `PROBE_AUTH_HASH` (bcrypt) for Caddy's basic auth (template: [`caddy/.env.example`](services/caddy/.env.example)) |
+| `caddy/.env` | rmx, `0600` | `PROBE_AUTH_USER`, `PROBE_AUTH_HASH` (bcrypt), `PROBE_WS_TOKEN` (WebSocket cookie, see Routes) for Caddy's basic auth (template: [`caddy/.env.example`](services/caddy/.env.example)) |
 | `mosquitto/data/credentials.txt` | root, `0600` | Also holds `probe-app` and `probe-web` |
 
 The bcrypt hash stays on the server too: a strong random password makes it practically uncrackable, but there's no reason to publish it.
@@ -503,6 +505,8 @@ The bcrypt hash stays on the server too: a strong random password makes it pract
 | `https://api.rmx.lt/probe/health` | probe-app health JSON (200 / 503) | Basic auth |
 | `wss://mqtt.rmx.lt/mqtt` | Mosquitto 9001 | MQTT login `probe-web` (typed into the page) |
 
+**WebSocket login on iPhones:** WebKit (Safari, and Chrome/Firefox on iOS, which all use it) doesn't send basic-auth credentials on WebSocket handshakes, so `/probe/ws` answered 401 in a loop and the login prompt kept coming back (found 2026-10-18 with a temporary access log). Browsers do send cookies there, so after a successful basic-auth login Caddy sets `probe_ws=<PROBE_WS_TOKEN>` (`Path=/probe/ws; Max-Age=86400; Secure; HttpOnly; SameSite=Strict`). `/probe/ws` is allowed with exactly that cookie *or* basic auth; the cookie opens nothing else (page and REST still need the password). If `PROBE_WS_TOKEN` is missing or shorter than 32 characters, the cookie path is off. New token (logs every browser's WebSocket out once): replace the line in `caddy/.env` with `PROBE_WS_TOKEN=$(openssl rand -hex 24)`, then `docker compose up -d --force-recreate caddy`.
+
 **Passwords** (read them on the server; never paste them into the repo or a chat):
 
 ```bash
@@ -510,7 +514,7 @@ sudo cat /opt/rmx-vps/services/probe/data/credentials.txt          # basic-auth 
 sudo awk '/^probe-web /{print $2}' /opt/rmx-vps/services/mosquitto/data/credentials.txt   # MQTT login for the page
 ```
 
-**Turn on / off** (on the server, in `/opt/rmx-vps/services`):
+**Turn on / off** (on the server, in `/opt/rmx-vps/services`; leave it off when you're done):
 
 ```bash
 docker compose --profile probe up -d           # start (or apply compose changes)

@@ -4,6 +4,19 @@ Newest entries at the top. Times in UTC. For each change, record **what**, **why
 
 ---
 
+## 2026-10-18 — Caddy: WebSocket cookie for iPhones
+
+- *Problem:* on an iPhone (Chrome, i.e. WebKit) the probe page kept asking for the login, and WSS never connected. A temporary access log (reload only, gone after the next restart) showed every normal request with `Authorization` (200) and every `/probe/ws` upgrade **without** it (401). WebKit doesn't send basic-auth credentials on WebSocket handshakes. PC and phone didn't share anything.
+- *Fix (Caddy only):* after a basic-auth login, Caddy sets the cookie `probe_ws=<PROBE_WS_TOKEN>` (`Path=/probe/ws`, 24 h, `Secure; HttpOnly; SameSite=Strict`); a new `@probe_ws_cookie` handle lets `/probe/ws` through with exactly that value (CEL `expression`, exact match, and the token must be ≥ 32 characters, otherwise the path is off). New `PROBE_WS_TOKEN` (48 hex chars) in `caddy/.env`; template in `caddy/.env.example` with a placeholder that is too short on purpose.
+- Tested with curl: right cookie → 101 without a password; wrong, empty or no cookie → 401; the cookie alone doesn't open the page or REST (401).
+- Undo: remove the `@probe_ws_cookie` block and the `header Set-Cookie` line from the Caddyfile, delete `PROBE_WS_TOKEN` from `caddy/.env`, `docker compose up -d --force-recreate caddy`.
+
+## 2026-10-18 — Probe off by default
+
+- After the end-to-end test (auto-deploy verified: merging rmx-backend-probe PR #5 deployed `sha-3402713` by itself), the probe was stopped with `docker compose stop probe-app probe-db`, and **off** is now the default.
+- *Why:* it's a learning tool, and the 1 GB VPS keeps ~50–70 MB more free when it's off. Deploys still run while it's off: the script records and pulls the tag but doesn't start anything.
+- Undo / use it: `docker compose --profile probe up -d` (README §10 → Probe).
+
 ## 2026-10-18 — rmx-backend-probe deployed, with auto-deploy
 
 *Why:* the probe (github.com/jRmx0/rmx-backend-probe) rehearses the whole production workflow: a Rust app plus a TimescaleDB container, routes behind Caddy, browser MQTT over WebSockets, and auto-deploy from GitHub Actions on merge to `main`. This setup will be copied for the production app.
