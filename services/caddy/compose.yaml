@@ -14,12 +14,6 @@ services:
       # Certificates and keys live here (gitignored, server only)
       - ./data/data:/data
       - ./data/config:/config
-    # Basic-auth user and hash for /probe (server only, gitignored),
-    # read by the Caddyfile as {$PROBE_AUTH_USER} and {$PROBE_AUTH_HASH}.
-    # Optional: without it the Caddyfile's fallback keeps /probe locked.
-    env_file:
-      - path: .env
-        required: false
     networks:
       - edge
 

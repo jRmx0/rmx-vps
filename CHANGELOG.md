@@ -4,6 +4,18 @@ Newest entries at the top. Times in UTC. For each change, record **what**, **why
 
 ---
 
+## 2026-10-19 — Probe: the app's own login replaces Caddy basic auth
+
+- *Why:* basic auth can't do a real logout, sends the password with every request, and iOS WebKit doesn't send it on WebSocket handshakes (yesterday's `probe_ws` cookie was a stopgap). Production will need a real login with server-side sessions, so the probe rehearses it first: rmx-backend-probe PR #9 (deployed as `sha-4537af9`).
+- *App (rmx-backend-probe):* login page, `users` table (Argon2id), `sessions` table (only a SHA-256 of the 256-bit cookie token is stored; 7-day idle, 30-day absolute timeout), cookie `__Secure-probe_session` (`HttpOnly; Secure; SameSite=Strict; Path=/probe`), checked on the API, `/probe/ws` and `/probe/config.json`; `/probe/health` stays public. Origin check against `ALLOWED_ORIGINS`, login backoff per username and IP. Details: its README, "Login and sessions".
+- *Caddy:* removed `basic_auth`, the `probe_ws` cookie (`@probe_ws_cookie` and the `Set-Cookie` header) and the `env_file`. `caddy/.env` (`PROBE_AUTH_USER`, `PROBE_AUTH_HASH`, `PROBE_WS_TOKEN`) deleted on the server, `caddy/.env.example` deleted from the repo. Closed by default still holds: the app requires its login for everything but health, login and the static page; probe off → 502.
+- *Probe compose:* `ALLOWED_ORIGINS: https://api.rmx.lt` (required by the new image; the server doesn't start without it).
+- *First user:* `probe`, created with `probe-server create-user` (password piped from stdin, 24 random characters). `probe/data/credentials.txt`: the basic-auth line was replaced by the app login.
+- *Applied:* `git merge --ff-only` on the server, the new Caddyfile validated in a throwaway `caddy:2.11` container, then `docker compose up -d --force-recreate caddy` (a few seconds of downtime for all sites), `caddy/.env` deleted, `docker compose --profile probe up -d probe-db probe-app` → healthy on `sha-4537af9`.
+- *Tested from the PC* (curl, 22/22): health and the page public; REST, `config.json` and the WebSocket → 401 without a cookie, with a forged cookie, after logout and after the session was expired in the DB; wrong password → 401; login from a foreign Origin → 403; login → 200 with `Path=/probe; HttpOnly; Secure; SameSite=Strict`; with the cookie: REST and `config.json` 200, POST without Origin or with a foreign one → 403, with `https://api.rmx.lt` → 201; WebSocket with cookie + Origin → 101, foreign Origin → 403. The user tested **PC and iPhone** in the browser: login, HTTPS, WSS, MQTT and logout all work (WSS on the iPhone included).
+- The probe was left **running** afterwards, at the user's request.
+- *Undo:* deploy an image from before the login (`sudo rmx-deploy-probe sha-7fd8f6c`) and revert this commit (Caddy basic auth, `caddy/.env` with a new hash: `docker compose exec caddy caddy hash-password`). The `users`/`sessions` tables stay in the DB and are ignored by the old image.
+
 ## 2026-10-18 — Caddy: WebSocket cookie for iPhones
 
 - *Problem:* on an iPhone (Chrome, i.e. WebKit) the probe page kept asking for the login, and WSS never connected. A temporary access log (reload only, gone after the next restart) showed every normal request with `Authorization` (200) and every `/probe/ws` upgrade **without** it (401). WebKit doesn't send basic-auth credentials on WebSocket handshakes. PC and phone didn't share anything.
