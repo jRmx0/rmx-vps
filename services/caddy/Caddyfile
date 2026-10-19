@@ -44,15 +44,8 @@ www.rmx.lt {
 
 # MQTT broker name. Caddy only obtains and renews the TLS certificate here;
 # a host timer copies it to Mosquitto (see services/mosquitto/cert-sync/).
-# MQTT itself is on port 8883, served by Mosquitto, not by Caddy.
-# /mqtt: MQTT over WebSockets for browsers (wss://mqtt.rmx.lt/mqtt). Caddy
-# adds TLS and proxies to Mosquitto's internal websockets listener (9001).
+# MQTT itself is on port 8883, served by Mosquitto, not by Caddy. No MQTT
+# goes through Caddy: browsers don't speak MQTT (removed 2026-10-20).
 mqtt.rmx.lt {
-	handle /mqtt {
-		reverse_proxy mosquitto:9001
-	}
-
-	handle {
-		respond "MQTT broker: mqtts://mqtt.rmx.lt:8883 (TLS), wss://mqtt.rmx.lt/mqtt (WebSockets)" 200
-	}
+	respond "MQTT broker: mqtts://mqtt.rmx.lt:8883 (TLS)" 200
 }

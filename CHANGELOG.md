@@ -4,6 +4,16 @@ Newest entries at the top. Times in UTC. For each change, record **what**, **why
 
 ---
 
+## 2026-10-20 — MQTT for devices only (no browser MQTT), like production
+
+- *Why:* production browsers will talk only to the backend (HTTPS + its WebSocket, with a session); only devices and the backend talk to the broker. The probe's browser MQTT (`wss://mqtt.rmx.lt/mqtt` → Mosquitto 9001, login `probe-web`) is no longer needed: the LTE modem probe tests MQTT on 8883 (`probe-device`). Removing it also closes the client-ID takeover over WebSockets, and Mosquitto now sees the real IP of every MQTT client.
+- *App:* rmx-backend-probe PR #__PR__ (deployed as `__TAG__`): no MQTT in the page, `MQTT_WS_URL` and `/probe/config.json` removed.
+- *Mosquitto:* listener 9001 (websockets) removed from `mosquitto.conf`; `probe-web` removed from `config/acl` (reinstalled 0600), from the password file (`mosquitto_passwd -D`) and from `data/credentials.txt`. `docker compose restart mosquitto` (listeners only change on restart; all clients reconnect).
+- *Caddy:* `mqtt.rmx.lt` answers only the one-line text (the block still gets the certificate for 8883); the `/mqtt` route is gone.
+- *Probe compose:* `MQTT_WS_URL` removed.
+- *Tested:* (to be filled in after the server test)
+- *Undo:* revert this commit; re-add `probe-web` with `mosquitto_passwd` (new password into `credentials.txt`), reinstall the ACL, `docker compose restart mosquitto`, recreate Caddy; deploy an app image from before the change.
+
 ## 2026-10-19 — Mosquitto + probe: `probe-device` login for the ESP32 LTE probe
 
 - *Why:* the LilyGo T-SIM7600 firmware (github.com/jRmx0/rmx-mower-modem-probe) talks to the probe over MQTT on 8883 and HTTPS. The user chose a dedicated login instead of sharing `probe-web`: on 8883 the client id is forced to the username, so the device gets its own `probe/req|res/probe-device` pair, and it can't read other clients' responses.
