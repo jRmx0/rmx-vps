@@ -358,7 +358,7 @@ Not public (reachable only by containers on `rmx_edge`): Mosquitto's plain MQTT 
 - Image `caddy:2.11` (2.11.7 when installed); container `rmx-caddy-1`.
 - Sites:
   - `https://rmx.lt`: static placeholder page from `site/`
-  - `https://api.rmx.lt`: placeholder JSON `{"service":"rmx-api","status":"placeholder"}`, except `/probe` and `/probe/*` → probe-app:8080 (prefix kept) behind **basic auth** (see [Probe](#probe-rmx-backend-probe)). When the probe is off, `/probe/*` answers 502 (after the password)
+  - `https://api.rmx.lt`: placeholder JSON `{"service":"rmx-api","status":"placeholder"}`, except `/probe` and `/probe/*` → probe-app:8080 (prefix kept). The app does its own login (see [Probe](#probe-rmx-backend-probe)); Caddy adds no auth. When the probe is off, `/probe/*` answers 502
   - `https://www.rmx.lt/…` → **301** to `https://rmx.lt/…`
   - `https://mqtt.rmx.lt`: a one-line text. The block exists so that Caddy obtains and renews the certificate Mosquitto uses (see [Mosquitto](#mosquitto-mqtt)). `wss://mqtt.rmx.lt/mqtt` → Mosquitto's WebSocket listener (`mosquitto:9001`) for browsers
   - every `http://…` → **308** to `https://…`
@@ -486,31 +486,39 @@ The whole probe uses about 50–70 MB of RAM while running (measured 2026-10-18:
 
 > **The probe is OFF by default** (decided 2026-10-18). Turn it on when you want to use it, and off again afterwards. Auto-deploys keep working while it's off: they only record the new tag in `probe/.env` and pull the image, so the next `up -d` starts the latest version. Containers that are stopped stay stopped after a reboot (`restart: unless-stopped`).
 
-**Where the values come from** (all server only, gitignored). Compose reads `probe/.env` automatically for the included `probe/compose.yaml`, because it sits next to it. Both `.env` files are optional: if one is missing, only the probe fails (Caddy then keeps `/probe` locked with a fallback hash whose password was thrown away), and the rest of the stack keeps working. That's also why the compose files use no `${VAR:?}` checks: Compose checks those even for services whose profile is off.
+**Where the values come from** (all server only, gitignored). Compose reads `probe/.env` automatically for the included `probe/compose.yaml`, because it sits next to it. It's optional: if it's missing, only the probe fails, and the rest of the stack keeps working. That's also why the compose files use no `${VAR:?}` checks: Compose checks those even for services whose profile is off.
 
 | File | Owner / mode | Contents |
 |---|---|---|
 | `probe/.env` | rmx, `0600` | `PROBE_DB_PASSWORD`, `PROBE_MQTT_PASSWORD`, and `PROBE_TAG=sha-…`, the deployed image (template: [`.env.example`](services/probe/.env.example)). **Only the deploy script changes `PROBE_TAG`**: a deploy is just "rewrite that line + recreate probe-app". rmx owns the file because `docker compose` (run as rmx) must read it |
-| `probe/data/credentials.txt` | root, `0600` | Plain-text copies: basic-auth password (user `probe`), DB password |
-| `caddy/.env` | rmx, `0600` | `PROBE_AUTH_USER`, `PROBE_AUTH_HASH` (bcrypt), `PROBE_WS_TOKEN` (WebSocket cookie, see Routes) for Caddy's basic auth (template: [`caddy/.env.example`](services/caddy/.env.example)) |
+| `probe/data/credentials.txt` | root, `0600` | Plain-text copies: the app login (user `probe`), DB password |
 | `mosquitto/data/credentials.txt` | root, `0600` | Also holds `probe-app` and `probe-web` |
 
-The bcrypt hash stays on the server too: a strong random password makes it practically uncrackable, but there's no reason to publish it.
+The app login itself lives in the probe database (`users` table, Argon2id hash); `credentials.txt` only keeps the plain-text copy for you.
 
 **Routes**
 
 | URL | Goes to | Login |
 |---|---|---|
-| `https://api.rmx.lt/probe/` | probe-app (page, `/probe/api/records`, `/probe/ws`, `/probe/config.json`) | Basic auth, user `probe` |
-| `https://api.rmx.lt/probe/health` | probe-app health JSON (200 / 503) | Basic auth |
+| `https://api.rmx.lt/probe/` | probe-app: the page with its login form (public), `/probe/api/…`, `/probe/ws`, `/probe/config.json` | The app's own login, user `probe` (session cookie) |
+| `https://api.rmx.lt/probe/health` | probe-app health JSON (200 / 503) | None (only up/down and the version) |
 | `wss://mqtt.rmx.lt/mqtt` | Mosquitto 9001 | MQTT login `probe-web` (typed into the page) |
 
-**WebSocket login on iPhones:** WebKit (Safari, and Chrome/Firefox on iOS, which all use it) doesn't send basic-auth credentials on WebSocket handshakes, so `/probe/ws` answered 401 in a loop and the login prompt kept coming back (found 2026-10-18 with a temporary access log). Browsers do send cookies there, so after a successful basic-auth login Caddy sets `probe_ws=<PROBE_WS_TOKEN>` (`Path=/probe/ws; Max-Age=86400; Secure; HttpOnly; SameSite=Strict`). `/probe/ws` is allowed with exactly that cookie *or* basic auth; the cookie opens nothing else (page and REST still need the password). If `PROBE_WS_TOKEN` is missing or shorter than 32 characters, the cookie path is off. New token (logs every browser's WebSocket out once): replace the line in `caddy/.env` with `PROBE_WS_TOKEN=$(openssl rand -hex 24)`, then `docker compose up -d --force-recreate caddy`.
+**Login** (since 2026-10-19; before that, Caddy basic auth): the app has its own login page and server-side sessions. After login the browser holds an `HttpOnly`, `Secure`, `SameSite=Strict` cookie (`__Secure-probe_session`, `Path=/probe`); the app checks it on every API request and on the WebSocket handshake, which also fixed WSS on iPhones (WebKit sends cookies on WebSocket handshakes, but not basic-auth credentials). Requests that change something and WebSocket handshakes must come from `https://api.rmx.lt` (`ALLOWED_ORIGINS` in `probe/compose.yaml`), and failed logins slow down (per username and IP). Why each choice: the probe README, ["Login and sessions"](https://github.com/jRmx0/rmx-backend-probe#login-and-sessions).
+
+**Users** (no sign-up page; run on the server, in `/opt/rmx-vps/services`, with the probe on). The password is piped in from stdin, so it never appears on a command line:
+
+```bash
+PW=$(openssl rand -base64 48 | tr -dc 'A-Za-z0-9' | head -c 24)
+printf '%s\n' "$PW" | docker compose exec -T probe-app /app/probe-server create-user probe    # or set-password probe (logs out everywhere)
+# then replace the "app login" line in probe/data/credentials.txt (sudo) with the new password
+docker compose exec -T probe-app /app/probe-server delete-user probe                           # remove a login
+```
 
 **Passwords** (read them on the server; never paste them into the repo or a chat):
 
 ```bash
-sudo cat /opt/rmx-vps/services/probe/data/credentials.txt          # basic-auth (user probe)
+sudo cat /opt/rmx-vps/services/probe/data/credentials.txt          # app login (user probe), DB password
 sudo awk '/^probe-web /{print $2}' /opt/rmx-vps/services/mosquitto/data/credentials.txt   # MQTT login for the page
 ```
 
@@ -558,7 +566,7 @@ Then on the server, replace the key part of the one line in `/home/deploy/.ssh/a
 - Stop and delete the containers: `docker compose rm -sf probe-app probe-db`; the data: `sudo rm -rf probe/data` (no backup, by choice).
 - Deploy access: `sudo rm /etc/sudoers.d/deploy /usr/local/sbin/rmx-deploy-probe && sudo userdel -r deploy`; delete the three `DEPLOY_*` secrets on GitHub (and disable the `deploy` job).
 - MQTT: `mosquitto_passwd -D` for `probe-app` and `probe-web` (see above), remove their lines from `credentials.txt` and the probe block from `config/acl`; remove the 9001 listener from `mosquitto.conf`.
-- Caddy: remove the `@probe` handle and `/mqtt` handle, `env_file` and `caddy/.env`.
+- Caddy: remove the `@probe` handle and the `/mqtt` handle.
 - Remove the `probe/compose.yaml` include from `services/compose.yaml`.
 
 ### Undo
