@@ -386,8 +386,9 @@ Not public (reachable only by containers on `rmx_edge`): Mosquitto's plain MQTT 
 | `mower-01` | `mower/mower-01/#` only | First mower |
 | `probe-app` | `probe/#` (read + write) | rmx-backend-probe server |
 | `probe-web` | write `probe/req/+`; read `probe/res/+`, `probe/events/#`, `probe/status/#` | The probe web page (password typed in) |
+| `probe-device` | write `probe/req/probe-device`; read `probe/res/probe-device`, `probe/events/#`, `probe/status/#` | The ESP32 LTE probe device ([rmx-mower-modem-probe](https://github.com/jRmx0/rmx-mower-modem-probe)), password in its gitignored `sdkconfig` |
 
-The rules in [`config/acl`](services/mosquitto/config/acl): `probe-app` and `probe-web` have explicit `user` entries; every login also gets `mower/<its username>/#` (`pattern readwrite mower/%u/#`). A new mower needs a login only, no ACL change. Planned topics: `mower/<id>/telemetry`, `mower/<id>/status` (retained, also the last-will), `mower/<id>/cmd`, `mower/<id>/cmd/ack`.
+The rules in [`config/acl`](services/mosquitto/config/acl): `probe-app`, `probe-web` and `probe-device` have explicit `user` entries; every login also gets `mower/<its username>/#` (`pattern readwrite mower/%u/#`). A new mower needs a login only, no ACL change. Planned topics: `mower/<id>/telemetry`, `mower/<id>/status` (retained, also the last-will), `mower/<id>/cmd`, `mower/<id>/cmd/ack`.
 
 How Mosquitto enforces it: a mower may **subscribe** to another mower's topic (the SUBSCRIBE is accepted), but no message from there is ever delivered to it. A **publish** to another mower's topic is dropped; with MQTT 5 and QoS 1 the client is told `Not authorized`.
 
@@ -492,7 +493,7 @@ The whole probe uses about 50–70 MB of RAM while running (measured 2026-10-18:
 |---|---|---|
 | `probe/.env` | rmx, `0600` | `PROBE_DB_PASSWORD`, `PROBE_MQTT_PASSWORD`, and `PROBE_TAG=sha-…`, the deployed image (template: [`.env.example`](services/probe/.env.example)). **Only the deploy script changes `PROBE_TAG`**: a deploy is just "rewrite that line + recreate probe-app". rmx owns the file because `docker compose` (run as rmx) must read it |
 | `probe/data/credentials.txt` | root, `0600` | Plain-text copies: the app login (user `probe`), DB password |
-| `mosquitto/data/credentials.txt` | root, `0600` | Also holds `probe-app` and `probe-web` |
+| `mosquitto/data/credentials.txt` | root, `0600` | Also holds `probe-app`, `probe-web` and `probe-device` |
 
 The app login itself lives in the probe database (`users` table, Argon2id hash); `credentials.txt` only keeps the plain-text copy for you.
 

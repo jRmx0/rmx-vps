@@ -30,3 +30,12 @@ topic write probe/req/+
 topic read probe/res/+
 topic read probe/events/#
 topic read probe/status/#
+
+# The ESP32 probe device (rmx-mower-modem-probe, LTE, 8883 only so the client
+# id is always "probe-device"): only its own request/response pair, plus the
+# shared events and server status.
+user probe-device
+topic write probe/req/probe-device
+topic read probe/res/probe-device
+topic read probe/events/#
+topic read probe/status/#
