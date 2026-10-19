@@ -351,7 +351,7 @@ services/
 | 443/tcp | Caddy | ✅ | HTTPS (HTTP/1.1 + HTTP/2). HTTP/3 is turned off, so 443/udp stays closed |
 | 8883/tcp | Mosquitto | ✅ | MQTT over TLS (`mqtt.rmx.lt`), login required |
 
-Not public (reachable only by containers on `rmx_edge`): Mosquitto's plain MQTT **1883** (`mosquitto:1883`, the app) and its WebSocket listener **9001** (`mosquitto:9001`, only via Caddy at `wss://mqtt.rmx.lt/mqtt`); probe-app's **8080** (only via Caddy at `https://api.rmx.lt/probe/`). probe-db's 5432 is on `rmx_backend` only.
+Not public (reachable only by containers on `rmx_edge`): Mosquitto's plain MQTT **1883** (`mosquitto:1883`, the app); probe-app's **8080** (only via Caddy at `https://api.rmx.lt/probe/`). probe-db's 5432 is on `rmx_backend` only.
 
 ### Caddy
 
@@ -360,7 +360,7 @@ Not public (reachable only by containers on `rmx_edge`): Mosquitto's plain MQTT 
   - `https://rmx.lt`: static placeholder page from `site/`
   - `https://api.rmx.lt`: placeholder JSON `{"service":"rmx-api","status":"placeholder"}`, except `/probe` and `/probe/*` → probe-app:8080 (prefix kept). The app does its own login (see [Probe](#probe-rmx-backend-probe)); Caddy adds no auth. When the probe is off, `/probe/*` answers 502
   - `https://www.rmx.lt/…` → **301** to `https://rmx.lt/…`
-  - `https://mqtt.rmx.lt`: a one-line text. The block exists so that Caddy obtains and renews the certificate Mosquitto uses (see [Mosquitto](#mosquitto-mqtt)). `wss://mqtt.rmx.lt/mqtt` → Mosquitto's WebSocket listener (`mosquitto:9001`) for browsers
+  - `https://mqtt.rmx.lt`: a one-line text. The block exists so that Caddy obtains and renews the certificate Mosquitto uses (see [Mosquitto](#mosquitto-mqtt)). No MQTT goes through Caddy
   - every `http://…` → **308** to `https://…`
 - Certificates: Let's Encrypt (issuers `YE1`/`YE2`), one per name, obtained automatically on first start (2026-10-15, valid until 2027-01-13). Caddy renews them about 30 days before they expire. No ACME email is set (Let's Encrypt no longer sends expiry emails, and an email would end up in this public repo).
 - State: `services/caddy/data/data` → `/data` (certs, ACME account key) and `services/caddy/data/config` → `/config`. If these are deleted, Caddy just requests new certificates. Let's Encrypt allows 5 duplicate certificates per week, so don't delete them in a loop.
@@ -371,10 +371,9 @@ Not public (reachable only by containers on `rmx_edge`): Mosquitto's plain MQTT 
 - Listeners ([`config/mosquitto.conf`](services/mosquitto/config/mosquitto.conf)):
   - **8883**: MQTT over TLS, TLS 1.2 minimum (1.3 preferred), certificate for `mqtt.rmx.lt`. Published.
   - **1883**: plain MQTT for containers on `rmx_edge` (the app). Not published.
-  - **9001**: MQTT over WebSockets (plain), for browsers through Caddy (`wss://mqtt.rmx.lt/mqtt`; Caddy adds TLS). Not published.
   - All: `allow_anonymous false`, logins from `data/auth/passwd`, rules from `data/auth/acl`.
 - On 8883, `use_username_as_clientid true`: the client ID is always the username. A second login as `mower-01` replaces the first (the broker logs "session taken over"), so one device can't kick another off by copying its client ID.
-- On 9001 (WebSockets) it is **off**, because each browser tab of the probe page connects as `probe-web` with its own client ID `web-<hex>`. The option is per listener in Mosquitto 2.1; the 8883 test suite still passes 12/12. ⚠️ Client IDs are shared across listeners, so whoever knows the `probe-web` password could connect over WebSockets with the client ID `mower-01` and kick that mower off. Acceptable for the probe; production browsers will need a different scheme (e.g. the app as the only MQTT client, or a plugin that enforces a client-ID prefix).
+- **No MQTT for browsers** (the production design, since 2026-10-20): browsers talk only to the app (HTTPS and its WebSocket, with a session); only devices (8883) and the app (1883) talk to the broker. The WebSocket listener 9001, Caddy's `wss://mqtt.rmx.lt/mqtt` route and the `probe-web` login were removed. That also closed the client-ID takeover over WebSockets (`use_username_as_clientid` was off on 9001) and means Mosquitto sees every device's real IP.
 - Persistence on (`data/store/mosquitto.db`, saved every 5 min and on shutdown): retained messages and persistent sessions survive restarts.
 - Logs go to stdout: `docker compose logs -f mosquitto`. They contain client IP addresses, so don't paste them into this repo.
 
@@ -385,10 +384,9 @@ Not public (reachable only by containers on `rmx_edge`): Mosquitto's plain MQTT 
 | `app` | `mower/#` (read + write) | The backend app (Phase 5) |
 | `mower-01` | `mower/mower-01/#` only | First mower |
 | `probe-app` | `probe/#` (read + write) | rmx-backend-probe server |
-| `probe-web` | write `probe/req/+`; read `probe/res/+`, `probe/events/#`, `probe/status/#` | The probe web page (password typed in) |
 | `probe-device` | write `probe/req/probe-device`; read `probe/res/probe-device`, `probe/events/#`, `probe/status/#` | The ESP32 LTE probe device ([rmx-mower-modem-probe](https://github.com/jRmx0/rmx-mower-modem-probe)), password in its gitignored `sdkconfig` |
 
-The rules in [`config/acl`](services/mosquitto/config/acl): `probe-app`, `probe-web` and `probe-device` have explicit `user` entries; every login also gets `mower/<its username>/#` (`pattern readwrite mower/%u/#`). A new mower needs a login only, no ACL change. Planned topics: `mower/<id>/telemetry`, `mower/<id>/status` (retained, also the last-will), `mower/<id>/cmd`, `mower/<id>/cmd/ack`.
+The rules in [`config/acl`](services/mosquitto/config/acl): `probe-app` and `probe-device` have explicit `user` entries; every login also gets `mower/<its username>/#` (`pattern readwrite mower/%u/#`). A new mower needs a login only, no ACL change. Planned topics: `mower/<id>/telemetry`, `mower/<id>/status` (retained, also the last-will), `mower/<id>/cmd`, `mower/<id>/cmd/ack`.
 
 How Mosquitto enforces it: a mower may **subscribe** to another mower's topic (the SUBSCRIBE is accepted), but no message from there is ever delivered to it. A **publish** to another mower's topic is dropped; with MQTT 5 and QoS 1 the client is told `Not authorized`.
 
@@ -493,7 +491,7 @@ The whole probe uses about 50–70 MB of RAM while running (measured 2026-10-18:
 |---|---|---|
 | `probe/.env` | rmx, `0600` | `PROBE_DB_PASSWORD`, `PROBE_MQTT_PASSWORD`, and `PROBE_TAG=sha-…`, the deployed image (template: [`.env.example`](services/probe/.env.example)). **Only the deploy script changes `PROBE_TAG`**: a deploy is just "rewrite that line + recreate probe-app". rmx owns the file because `docker compose` (run as rmx) must read it |
 | `probe/data/credentials.txt` | root, `0600` | Plain-text copies: the app login (user `probe`), DB password |
-| `mosquitto/data/credentials.txt` | root, `0600` | Also holds `probe-app`, `probe-web` and `probe-device` |
+| `mosquitto/data/credentials.txt` | root, `0600` | Also holds `probe-app` and `probe-device` |
 
 The app login itself lives in the probe database (`users` table, Argon2id hash); `credentials.txt` only keeps the plain-text copy for you.
 
@@ -501,9 +499,9 @@ The app login itself lives in the probe database (`users` table, Argon2id hash);
 
 | URL | Goes to | Login |
 |---|---|---|
-| `https://api.rmx.lt/probe/` | probe-app: the page with its login form (public), `/probe/api/…`, `/probe/ws`, `/probe/config.json` | The app's own login, user `probe` (session cookie) |
+| `https://api.rmx.lt/probe/` | probe-app: the page with its login form (public), `/probe/api/…`, `/probe/ws` | The app's own login, user `probe` (session cookie) |
 | `https://api.rmx.lt/probe/health` | probe-app health JSON (200 / 503) | None (only up/down and the version) |
-| `wss://mqtt.rmx.lt/mqtt` | Mosquitto 9001 | MQTT login `probe-web` (typed into the page) |
+| `mqtts://mqtt.rmx.lt:8883` | Mosquitto (devices only, e.g. `probe-device`) | MQTT login per device |
 
 **Login** (since 2026-10-19; before that, Caddy basic auth): the app has its own login page and server-side sessions. After login the browser holds an `HttpOnly`, `Secure`, `SameSite=Strict` cookie (`__Secure-probe_session`, `Path=/probe`); the app checks it on every API request and on the WebSocket handshake, which also fixed WSS on iPhones (WebKit sends cookies on WebSocket handshakes, but not basic-auth credentials). Requests that change something and WebSocket handshakes must come from `https://api.rmx.lt` (`ALLOWED_ORIGINS` in `probe/compose.yaml`), and failed logins slow down (per username and IP). Why each choice: the probe README, ["Login and sessions"](https://github.com/jRmx0/rmx-backend-probe#login-and-sessions).
 
@@ -520,7 +518,7 @@ docker compose exec -T probe-app /app/probe-server delete-user probe            
 
 ```bash
 sudo cat /opt/rmx-vps/services/probe/data/credentials.txt          # app login (user probe), DB password
-sudo awk '/^probe-web /{print $2}' /opt/rmx-vps/services/mosquitto/data/credentials.txt   # MQTT login for the page
+sudo awk '$1=="probe-device"{print $2}' /opt/rmx-vps/services/mosquitto/data/credentials.txt   # MQTT login of the modem probe
 ```
 
 **Turn on / off** (on the server, in `/opt/rmx-vps/services`; leave it off when you're done):
@@ -566,8 +564,8 @@ Then on the server, replace the key part of the one line in `/home/deploy/.ssh/a
 
 - Stop and delete the containers: `docker compose rm -sf probe-app probe-db`; the data: `sudo rm -rf probe/data` (no backup, by choice).
 - Deploy access: `sudo rm /etc/sudoers.d/deploy /usr/local/sbin/rmx-deploy-probe && sudo userdel -r deploy`; delete the three `DEPLOY_*` secrets on GitHub (and disable the `deploy` job).
-- MQTT: `mosquitto_passwd -D` for `probe-app` and `probe-web` (see above), remove their lines from `credentials.txt` and the probe block from `config/acl`; remove the 9001 listener from `mosquitto.conf`.
-- Caddy: remove the `@probe` handle and the `/mqtt` handle.
+- MQTT: `mosquitto_passwd -D` for `probe-app` and `probe-device` (see above), remove their lines from `credentials.txt` and the probe block from `config/acl`.
+- Caddy: remove the `@probe` handle.
 - Remove the `probe/compose.yaml` include from `services/compose.yaml`.
 
 ### Undo

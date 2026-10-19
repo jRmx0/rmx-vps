@@ -18,18 +18,11 @@ topic readwrite mower/#
 pattern readwrite mower/%u/#
 
 # --- rmx-backend-probe (see README §10 "Probe") ---------------------------
-# Topics: probe/req/<client-id> (browser -> server), probe/res/<client-id>
-# (server -> browser), probe/events/records, probe/status/server (retained).
+# Topics: probe/req/<client-id> (device -> server), probe/res/<client-id>
+# (server -> device), probe/events/records, probe/status/server (retained).
 # The probe server: all of probe/.
 user probe-app
 topic readwrite probe/#
-
-# The browser (typed-in password): send requests, read the rest. Nothing else.
-user probe-web
-topic write probe/req/+
-topic read probe/res/+
-topic read probe/events/#
-topic read probe/status/#
 
 # The ESP32 probe device (rmx-mower-modem-probe, LTE, 8883 only so the client
 # id is always "probe-device"): only its own request/response pair, plus the
