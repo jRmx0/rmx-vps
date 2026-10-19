@@ -4,6 +4,16 @@ Newest entries at the top. Times in UTC. For each change, record **what**, **why
 
 ---
 
+## 2026-10-19 — Mosquitto + probe: `probe-device` login for the ESP32 LTE probe
+
+- *Why:* the LilyGo T-SIM7600 firmware (github.com/jRmx0/rmx-mower-modem-probe) talks to the probe over MQTT on 8883 and HTTPS. The user chose a dedicated login instead of sharing `probe-web`: on 8883 the client id is forced to the username, so the device gets its own `probe/req|res/probe-device` pair, and it can't read other clients' responses.
+- *Mosquitto:* new login `probe-device` (random 32-character password, `data/credentials.txt`). `config/acl`: `user probe-device` → write `probe/req/probe-device`; read `probe/res/probe-device`, `probe/events/#`, `probe/status/#` (plus `mower/probe-device/#` from the pattern; the device uses `mower/probe-device/status` as its retained status and last will). Installed with `install -o 1883 -g 1883 -m 0600` + HUP (no disconnects).
+- *Probe app:* web user `probe-device` (`probe-server create-user`, 24-character password from stdin), plain-text copy as `app-login probe-device …` in `probe/data/credentials.txt`.
+- The passwords were copied into the device's gitignored `sdkconfig` over ssh without being printed.
+- *Applied:* `git merge --ff-only` of this branch on the server, then a one-off script (scp to `/tmp`, `sudo bash`, deleted).
+- *Tested from the device over LTE:* MQTT CONNACK as `probe-device`, `create`/`list` on `probe/req/probe-device` answered on `probe/res/probe-device`, `probe/events/records` and the retained `probe/status/server` received; HTTPS login → 200 + cookie, create → 201, list → 200. 4 test records (ids 30–33) were left in the probe DB.
+- *Undo:* `docker compose exec -u mosquitto mosquitto mosquitto_passwd -D /mosquitto/auth/passwd probe-device`, remove the `probe-device` block from `config/acl`, reinstall the ACL + HUP, delete its line in `mosquitto/data/credentials.txt`; `docker compose exec -T probe-app /app/probe-server delete-user probe-device` and delete its line in `probe/data/credentials.txt`.
+
 ## 2026-10-19 — Probe: the app's own login replaces Caddy basic auth
 
 - *Why:* basic auth can't do a real logout, sends the password with every request, and iOS WebKit doesn't send it on WebSocket handshakes (yesterday's `probe_ws` cookie was a stopgap). Production will need a real login with server-side sessions, so the probe rehearses it first: rmx-backend-probe PR #9 (deployed as `sha-4537af9`).
