@@ -4,6 +4,14 @@ Newest entries at the top. Times in UTC. For each change, record **what**, **why
 
 ---
 
+## 2026-10-22 — Caddy: `/fw/*` for OTA firmware images (basic auth)
+
+- *Why:* the LTE modem board (rmx-mower-modem-probe PR #9) updates its firmware over the air from `https://api.rmx.lt/fw/probe/<version>.bin`. The images are signed (the key exists only on the PC), and the login only keeps casual downloads away. Justas approved the route on 2026-10-22.
+- *Caddy:* PR #5. `handle /fw/*` in `api.rmx.lt` → `file_server` from `caddy/firmware/` (read-only mount at `/srv/fw`), `basic_auth` users imported from `caddy/private/fw-users.caddy` (server only, gitignored, template `fw-users.caddy.example`). Two new read-only mounts in `caddy/compose.yaml`.
+- *Applied:* `git pull --ff-only` (ca22540), created `caddy/firmware/probe/`, `caddy/private/fw-users.caddy` (login `probe-device`, bcrypt hash from `docker exec rmx-caddy-1 caddy hash-password`) and `caddy/private/credentials.txt` (root, `0600`, plain-text copy), then `docker compose up -d caddy`. The password was copied into the device's gitignored `sdkconfig` over ssh without being printed.
+- *Tested:* `/fw/probe/x.bin` without a login → 401; `rmx.lt` → 200; `/probe/health` → 200; no errors in the Caddy log. From the device over LTE: first OTA 0.2.0 → 0.2.1 (856 KB) downloaded in ~2 min, rebooted into `ota_1`, confirmed itself after MQTT connected; ~3 min from command to confirmed.
+- *Undo:* revert PR #5, `docker compose up -d caddy`, then `sudo rm -r caddy/firmware caddy/private`.
+
 ## 2026-10-20 — MQTT for devices only (no browser MQTT), like production
 
 - *Why:* production browsers will talk only to the backend (HTTPS + its WebSocket, with a session); only devices and the backend talk to the broker. The probe's browser MQTT (`wss://mqtt.rmx.lt/mqtt` → Mosquitto 9001, login `probe-web`) is no longer needed: the LTE modem probe tests MQTT on 8883 (`probe-device`). Removing it also closes the client-ID takeover over WebSockets, and Mosquitto now sees the real IP of every MQTT client.

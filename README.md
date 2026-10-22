@@ -384,7 +384,7 @@ One-time setup (on the server; create the users file **before** restarting Caddy
 cd /opt/rmx-vps/services/caddy
 mkdir -p firmware/probe private
 P=$(openssl rand -base64 24 | tr -d '/+=' | cut -c1-32)
-H=$(docker compose exec -T caddy caddy hash-password --plaintext "$P")
+H=$(docker exec rmx-caddy-1 caddy hash-password --plaintext "$P")   # from caddy/, compose would treat caddy/compose.yaml as its own project
 echo "probe-device $H" > private/fw-users.caddy
 echo "probe-device $P" | sudo tee private/credentials.txt >/dev/null; sudo chmod 600 private/credentials.txt; unset P H
 cd .. && docker compose up -d caddy        # new mounts: recreate the container
