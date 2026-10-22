@@ -316,6 +316,9 @@ services/
 │   ├── compose.yaml      # Caddy container
 │   ├── Caddyfile         # sites, TLS, redirects
 │   ├── site/index.html   # placeholder page for rmx.lt
+│   ├── fw-users.caddy.example  # template for private/fw-users.caddy (download logins for /fw/*)
+│   ├── firmware/         # (server only, gitignored) OTA images, served at /fw/
+│   ├── private/          # (server only, gitignored) fw-users.caddy
 │   └── data/             # (server only, gitignored) certificates + Caddy state
 ├── mosquitto/
 │   ├── compose.yaml      # Mosquitto container
@@ -359,11 +362,36 @@ Not public (reachable only by containers on `rmx_edge`): Mosquitto's plain MQTT 
 - Sites:
   - `https://rmx.lt`: static placeholder page from `site/`
   - `https://api.rmx.lt`: placeholder JSON `{"service":"rmx-api","status":"placeholder"}`, except `/probe` and `/probe/*` → probe-app:8080 (prefix kept). The app does its own login (see [Probe](#probe-rmx-backend-probe)); Caddy adds no auth. When the probe is off, `/probe/*` answers 502
+  - `https://api.rmx.lt/fw/*`: OTA firmware images, static files with HTTP basic auth (see [Firmware images](#firmware-images-ota))
   - `https://www.rmx.lt/…` → **301** to `https://rmx.lt/…`
   - `https://mqtt.rmx.lt`: a one-line text. The block exists so that Caddy obtains and renews the certificate Mosquitto uses (see [Mosquitto](#mosquitto-mqtt)). No MQTT goes through Caddy
   - every `http://…` → **308** to `https://…`
 - Certificates: Let's Encrypt (issuers `YE1`/`YE2`), one per name, obtained automatically on first start (2026-10-15, valid until 2027-01-13). Caddy renews them about 30 days before they expire. No ACME email is set (Let's Encrypt no longer sends expiry emails, and an email would end up in this public repo).
 - State: `services/caddy/data/data` → `/data` (certs, ACME account key) and `services/caddy/data/config` → `/config`. If these are deleted, Caddy just requests new certificates. Let's Encrypt allows 5 duplicate certificates per week, so don't delete them in a loop.
+
+### Firmware images (OTA)
+
+The LTE modem board ([rmx-mower-modem-probe](https://github.com/jRmx0/rmx-mower-modem-probe), README "Firmware updates") downloads new firmware from `https://api.rmx.lt/fw/probe/<version>.bin`.
+
+- Files: `services/caddy/firmware/` on the host → `/srv/fw` in Caddy, read-only. `firmware/probe/<version>.bin` is served as `/fw/probe/<version>.bin`. Range requests work (the device resumes dropped downloads); directories give 404, not a listing.
+- Login: HTTP basic auth, one login per device, in `services/caddy/private/fw-users.caddy` (server only, gitignored; template [`fw-users.caddy.example`](services/caddy/fw-users.caddy.example)). Plain-text copies go in `caddy/private/credentials.txt` (root, `0600`). **The file must exist or Caddy won't start**; an empty file locks `/fw/` (401 for everyone). Tested with Caddy 2.11.2 (2026-10-22, locally): no login 401, wrong password 401, right one 200, `Range` 206, directory 404, missing users file = config error, empty file = 401.
+- Trust: the images are signed with a key that exists only on the PC, and the device refuses an image with any other signature. The login only keeps casual downloads away, so a hacked server can't push its own firmware.
+- Upload: `tools\release.ps1` in rmx-mower-modem-probe (scp as rmx into `firmware/probe/`).
+
+One-time setup (on the server; create the users file **before** restarting Caddy):
+
+```bash
+cd /opt/rmx-vps/services/caddy
+mkdir -p firmware/probe private
+P=$(openssl rand -base64 24 | tr -d '/+=' | cut -c1-32)
+H=$(docker compose exec -T caddy caddy hash-password --plaintext "$P")
+echo "probe-device $H" > private/fw-users.caddy
+echo "probe-device $P" | sudo tee private/credentials.txt >/dev/null; sudo chmod 600 private/credentials.txt; unset P H
+cd .. && docker compose up -d caddy        # new mounts: recreate the container
+curl -s -o /dev/null -w "%{http_code}\n" https://api.rmx.lt/fw/probe/x.bin   # 401
+```
+
+Then copy the password into the device's `sdkconfig` (`CONFIG_PROBE_OTA_PASSWORD`) without printing it, the same way as the MQTT password. New device: add a line to `fw-users.caddy`, `docker compose restart caddy`.
 
 ### Mosquitto (MQTT)
 
