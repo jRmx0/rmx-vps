@@ -27,3 +27,8 @@ services/*/data/
 # Caddy: OTA firmware images and their download logins
 services/caddy/firmware/
 services/caddy/private/
+
+# Ansible: the vault password is never stored (typed at each run);
+# group_vars/all/vault.yml IS committed, but only encrypted (CI checks it)
+ansible/.vault-pass*
+ansible/*.retry

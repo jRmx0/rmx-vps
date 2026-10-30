@@ -1,0 +1,5 @@
+# Open sessions survive a restart (each runs in its own sshd process).
+- name: Restart sshd
+  ansible.builtin.systemd_service:
+    name: ssh
+    state: restarted

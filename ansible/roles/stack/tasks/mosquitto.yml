@@ -1,0 +1,135 @@
+# Mosquitto's server-only files (README §10 "Mosquitto"): logins, the
+# installed ACL, folders for the certificate and persistence. Mosquitto runs
+# as uid 1883 inside the container.
+
+- name: Mosquitto folders
+  ansible.builtin.file:
+    path: "{{ services_dir }}/mosquitto/data/{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ item.owner }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - { path: "", owner: root, mode: "0755" }
+    - { path: auth, owner: "1883", mode: "0750" }
+    - { path: certs, owner: "1883", mode: "0750" }
+    - { path: store, owner: "1883", mode: "0700" }
+
+# Mosquitto reads a copy it owns (it warns about world-readable ACL files).
+- name: ACL (installed copy of config/acl)
+  ansible.builtin.copy:
+    src: "{{ services_dir }}/mosquitto/config/acl"
+    remote_src: true
+    dest: "{{ services_dir }}/mosquitto/data/auth/acl"
+    owner: "1883"
+    group: "1883"
+    mode: "0600"
+  notify: Reload mosquitto
+
+# mosquitto_passwd salts every hash, so it can't be re-run on each play
+# without "changing" everything. A login is added when it is missing; to
+# change a password, edit the vault and run with -e reset_mqtt_passwords=true
+# (all logins are recreated and clients must reconnect).
+- name: Reset the logins file
+  ansible.builtin.file:
+    path: "{{ services_dir }}/mosquitto/data/auth/passwd"
+    state: absent
+  when: reset_mqtt_passwords | default(false) | bool
+  notify: Reload mosquitto
+
+- name: Logins file exists
+  ansible.builtin.copy:
+    content: ""
+    dest: "{{ services_dir }}/mosquitto/data/auth/passwd"
+    force: false
+    owner: "1883"
+    group: "1883"
+    mode: "0600"
+
+- name: Which logins exist
+  ansible.builtin.command:
+    argv: [cut, "-d:", -f1, "{{ services_dir }}/mosquitto/data/auth/passwd"]
+  register: mqtt_have
+  changed_when: false
+  check_mode: false
+
+# Pulled by itself, so a failed download is a clear error and a retry here,
+# not a puzzling failure of the first login.
+- name: Is the image that hashes the passwords here
+  ansible.builtin.command: docker image inspect {{ mosquitto_image }}
+  register: mqtt_image
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Pull the image that hashes the passwords
+  ansible.builtin.command: docker pull -q {{ mosquitto_image }}
+  register: mqtt_pull
+  until: mqtt_pull.rc == 0
+  retries: 3
+  delay: 10
+  changed_when: true
+  when: mqtt_image.rc != 0 and not ansible_check_mode
+
+- name: Add missing logins
+  ansible.builtin.command:
+    argv:
+      - docker
+      - run
+      - --rm
+      - -v
+      - "{{ services_dir }}/mosquitto/data/auth:/mosquitto/auth"
+      - --user
+      - "1883"
+      - "{{ mosquitto_image }}"
+      - mosquitto_passwd
+      - -b
+      - /mosquitto/auth/passwd
+      - "{{ item.key }}"
+      - "{{ item.value }}"
+  loop: "{{ vault_mosquitto_users | dict2items }}"
+  loop_control: { label: "{{ item.key }}" }
+  when: item.key not in mqtt_have.stdout_lines
+  no_log: true
+  changed_when: true
+  notify: Reload mosquitto
+
+- name: Plain-text copies of the logins (for you)
+  ansible.builtin.copy:
+    dest: "{{ services_dir }}/mosquitto/data/credentials.txt"
+    content: |
+      {% for user, password in vault_mosquitto_users.items() %}
+      {{ user }} {{ password }}
+      {% endfor %}
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+
+# Mosquitto's own copy of the certificate: cert-sync.
+- name: Cert-sync script
+  ansible.builtin.copy:
+    src: "{{ services_dir }}/mosquitto/cert-sync/rmx-mqtt-cert-sync.sh"
+    remote_src: true
+    dest: /usr/local/sbin/rmx-mqtt-cert-sync
+    mode: "0755"
+
+- name: Cert-sync units
+  ansible.builtin.copy:
+    src: "{{ services_dir }}/mosquitto/cert-sync/{{ item }}"
+    remote_src: true
+    dest: "/etc/systemd/system/{{ item }}"
+    mode: "0644"
+  loop: [rmx-mqtt-cert-sync.service, rmx-mqtt-cert-sync.timer]
+  register: cert_sync_units
+
+- name: Systemd reads the new units
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+  when: cert_sync_units.changed
+
+- name: Cert-sync twice a day and after boot
+  ansible.builtin.systemd_service:
+    name: rmx-mqtt-cert-sync.timer
+    state: started
+    enabled: true

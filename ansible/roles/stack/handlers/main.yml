@@ -1,0 +1,16 @@
+# Both only act when the container is running; compose up starts it otherwise.
+- name: Restart caddy
+  ansible.builtin.shell: |
+    if [ "$(docker inspect -f '{{ '{{' }}.State.Running{{ '}}' }}' rmx-caddy-1 2>/dev/null)" = true ]; then
+      docker compose restart caddy
+    fi
+  args: { chdir: "{{ services_dir }}" }
+  changed_when: true
+
+# SIGHUP reloads logins, ACL and certificate without dropping clients.
+- name: Reload mosquitto
+  ansible.builtin.shell: |
+    if [ "$(docker inspect -f '{{ '{{' }}.State.Running{{ '}}' }}' rmx-mosquitto-1 2>/dev/null)" = true ]; then
+      docker kill --signal HUP rmx-mosquitto-1
+    fi
+  changed_when: true

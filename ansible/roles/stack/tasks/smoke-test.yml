@@ -1,0 +1,35 @@
+# The server answers: sites over HTTPS (through localhost, so DNS doesn't
+# matter), the /fw/ login, and MQTT's TLS port.
+
+- name: Sites answer over HTTPS
+  ansible.builtin.command: >
+    curl -sS --noproxy '*' -o /dev/null -w '%{http_code}'
+    --resolve {{ item.host }}:443:127.0.0.1 https://{{ item.host }}{{ item.path }}
+  register: smoke_http
+  until: smoke_http.stdout == item.expect
+  retries: 12
+  delay: 5
+  changed_when: false
+  failed_when: smoke_http.stdout != item.expect
+  loop:
+    - { host: rmx.lt, path: /, expect: "200" }
+    - { host: api.rmx.lt, path: /, expect: "200" }
+    - { host: api.rmx.lt, path: /fw/probe/x.bin, expect: "401" }
+    - { host: www.rmx.lt, path: /, expect: "301" }
+  loop_control: { label: "{{ item.host }}{{ item.path }} -> {{ item.expect }}" }
+
+- name: MQTT port 8883 does a TLS handshake
+  ansible.builtin.shell: >
+    echo | openssl s_client -connect 127.0.0.1:8883 -servername {{ mqtt_domain }}
+    -verify_return_error -brief 2>&1 | grep -q 'Verification: OK'
+  register: smoke_mqtt
+  until: smoke_mqtt.rc == 0
+  retries: 6
+  delay: 5
+  changed_when: false
+
+- name: Probe health (only when it is running)
+  ansible.builtin.command: >
+    curl -fsS --noproxy '*' --resolve api.rmx.lt:443:127.0.0.1 https://api.rmx.lt/probe/health
+  when: probe == "on"
+  changed_when: false

@@ -4,6 +4,15 @@ Newest entries at the top. Times in UTC. For each change, record **what**, **why
 
 ---
 
+## 2026-10-30 — Setup as code: Ansible playbook + vault (not applied to the live server yet)
+
+- *Why:* the server was built by hand, so what it is lived in this log and in memory. The goal is a lean server that can be rebuilt from empty and where nothing done by hand lingers. Justas chose Ansible + Ansible Vault, and a rebuild by reinstalling the VPS (nothing real runs on it, so downtime is fine; database data is not kept).
+- *Added:* `ansible/` (roles `base`, `users`, `ssh`, `firewall`, `docker`, `stack`; `bootstrap.sh` for a fresh VPS; `export-vault.sh` to collect the current server's secrets; runbook in `ansible/README.md`), a CI check (`.github/workflows/ansible.yml`: syntax, lint, vault must be encrypted), README §11.
+- *Also in the code, new compared with the hand-built server (from the 2026-10-23 security review):* `X11Forwarding no`, `AllowUsers rmx deploy root@<dashboard IP>`, `Match User deploy` with `DisableForwarding yes`, unattended security updates with a 04:30 reboot, kernel network settings (no redirects/source routing, `rp_filter`, martian logging), `snapd` removed, old `sshd_config.bak-*` removed, ufw rules not in the list are deleted.
+- *Tested:* a fresh `ubuntu:24.04` container with systemd, Docker inside: the whole playbook ran from empty (Docker's key fingerprint verified, Mosquitto 2.1.2 up with all logins and the synced certificate, Caddy up, sshd/ufw/sudoers results checked), a second run changed nothing, `--check --diff` showed a manual sshd change. **Not tested:** Let's Encrypt issuance and the HTTPS smoke test (no DNS in the container), `-e probe=on` (needs the real image), the swapfile (container), a real reboot.
+- *Applied:* nothing on the live server. Next: `export-vault.sh` there, encrypt and commit the vault, `--check --diff`, then reinstall from the provider dashboard and run `bootstrap.sh`.
+- *Undo:* nothing to undo on the server; revert the PR.
+
 ## 2026-10-22 — Caddy: `/fw/*` for OTA firmware images (basic auth)
 
 - *Why:* the LTE modem board (rmx-mower-modem-probe PR #9) updates its firmware over the air from `https://api.rmx.lt/fw/probe/<version>.bin`. The images are signed (the key exists only on the PC), and the login only keeps casual downloads away. Justas approved the route on 2026-10-22.

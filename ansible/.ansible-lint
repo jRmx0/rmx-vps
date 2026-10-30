@@ -1,0 +1,8 @@
+# The rules below are style choices that don't fit a one-server playbook.
+profile: moderate
+skip_list:
+  - var-naming[no-role-prefix]   # register names are local to one play
+  - command-instead-of-module    # curl/git: no module gives the same check
+  - no-changed-when              # set where it matters
+exclude_paths:
+  - group_vars/all/vault.yml

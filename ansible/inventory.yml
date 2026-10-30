@@ -1,0 +1,10 @@
+# One server. bootstrap.sh runs the playbook ON the server (connection local),
+# so this also works from the provider's dashboard terminal on an empty VPS.
+# From WSL on the PC instead: ansible-playbook site.yml -e target=remote
+all:
+  hosts:
+    rmx-vps:
+      ansible_connection: "{{ 'ssh' if target | default('local') == 'remote' else 'local' }}"
+      ansible_host: 45.81.252.43
+      ansible_user: rmx
+      ansible_become: true

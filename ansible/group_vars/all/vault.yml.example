@@ -1,0 +1,47 @@
+# Template for vault.yml: every secret the playbook needs. Fill it in, then
+# encrypt it (the real file is committed ENCRYPTED, the repo is public):
+#   cp vault.yml.example vault.yml && ansible-vault encrypt vault.yml
+# Change a value later: ansible-vault edit group_vars/all/vault.yml
+# export-vault.sh builds this file from a running server.
+
+# SSH host keys. Kept so the server keeps its identity after a rebuild: the
+# PC's known_hosts and the GitHub secret DEPLOY_KNOWN_HOSTS (probe auto-deploy)
+# pin the ed25519 key. Leave the list empty to get new keys on a fresh server.
+vault_ssh_host_keys:
+  - type: ed25519
+    private: |
+      -----BEGIN OPENSSH PRIVATE KEY-----
+      ...
+      -----END OPENSSH PRIVATE KEY-----
+    public: ssh-ed25519 AAAA... root@vps3124
+
+# Mosquitto logins: user -> password. probe-app's password is also given to
+# the probe (probe/.env); mower and device passwords are in their firmware.
+vault_mosquitto_users:
+  app: change-me
+  mower-01: change-me
+  probe-app: change-me
+  probe-device: change-me
+
+# Download logins for /fw/* (HTTP basic auth). hash = bcrypt of password:
+#   docker exec rmx-caddy-1 caddy hash-password --plaintext "$P"
+vault_caddy_fw_users:
+  - name: probe-device
+    password: change-me
+    hash: $2a$14$...
+
+# rmx-backend-probe: database password (letters and digits only, it goes
+# into a URL), the image tag to start from, and the app's own logins.
+vault_probe_db_password: change-me
+vault_probe_tag: sha-0000000
+vault_probe_app_users:
+  probe: change-me
+  probe-device: change-me
+
+# Public key of the GitHub Actions deploy key (rmx-backend-probe secret
+# DEPLOY_SSH_KEY). It only gets the forced deploy command.
+vault_deploy_ssh_key: ssh-ed25519 AAAA... rmx-backend-probe-deploy
+
+# Optional: private deploy key with write access to this repo, so the server
+# can push (README §9). Leave empty and the server clone stays read-only.
+vault_github_deploy_key: ""

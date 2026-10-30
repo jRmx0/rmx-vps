@@ -1,0 +1,110 @@
+# Updates, automatic security updates, swap, kernel settings, cleanup.
+
+- name: Upgrade all packages
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+    upgrade: dist
+  register: apt_upgrade
+
+- name: Packages the setup uses
+  ansible.builtin.apt:
+    name: [openssh-server, unattended-upgrades, ufw, fail2ban, git, curl, ca-certificates, openssl, gnupg]
+    state: present
+
+- name: Remove packages nothing here uses
+  ansible.builtin.apt:
+    name: "{{ purge_packages }}"
+    state: absent
+    purge: true
+
+- name: Remove packages that are no longer needed
+  ansible.builtin.apt:
+    autoremove: true
+    purge: true
+  when: not ansible_check_mode
+
+# --- Automatic security updates -----------------------------------------
+- name: Turn on the nightly update run
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    content: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+      APT::Periodic::AutocleanInterval "7";
+    mode: "0644"
+
+- name: Reboot after updates that need it
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/52rmx-unattended-upgrades
+    content: |
+      // Managed by ansible (rmx-vps). Security updates are on by default in
+      // 50unattended-upgrades; this adds cleanup and the reboot.
+      Unattended-Upgrade::Remove-Unused-Kernel-Packages "true";
+      Unattended-Upgrade::Remove-Unused-Dependencies "true";
+      Unattended-Upgrade::Automatic-Reboot "true";
+      Unattended-Upgrade::Automatic-Reboot-Time "{{ auto_reboot_time }}";
+    mode: "0644"
+
+# --- Swap (1 GB RAM) ----------------------------------------------------
+# Skipped inside containers (testing the playbook): they have no swap of their own.
+- name: Swap
+  when: ansible_facts['virtualization_type'] | default('') not in ['docker', 'container', 'podman']
+  block:
+    - name: Swapfile exists
+      ansible.builtin.stat:
+        path: /swapfile
+      register: swapfile
+
+    - name: Create the swapfile
+      ansible.builtin.shell: |
+        set -e
+        fallocate -l {{ swap_size_mb }}M /swapfile
+        chmod 600 /swapfile
+        mkswap /swapfile
+      when: not swapfile.stat.exists
+
+    - name: Is it in use
+      ansible.builtin.command: swapon --show=NAME --noheadings
+      register: swap_active
+      changed_when: false
+      check_mode: false
+
+    - name: Turn swap on
+      ansible.builtin.command: swapon /swapfile
+      when: "'/swapfile' not in swap_active.stdout"
+
+    - name: Swap on at boot
+      ansible.builtin.lineinfile:
+        path: /etc/fstab
+        line: /swapfile none swap sw 0 0
+
+# --- Kernel settings ----------------------------------------------------
+- name: Kernel settings
+  ansible.builtin.copy:
+    dest: /etc/sysctl.d/60-rmx.conf
+    content: |
+      # Managed by ansible (rmx-vps).
+      # Swap only under real memory pressure.
+      vm.swappiness={{ swappiness }}
+      # Ignore ICMP redirects and source-routed packets (a server routes nothing
+      # by itself; Docker's forwarding is unaffected).
+      net.ipv4.conf.all.accept_redirects=0
+      net.ipv4.conf.default.accept_redirects=0
+      net.ipv6.conf.all.accept_redirects=0
+      net.ipv6.conf.default.accept_redirects=0
+      net.ipv4.conf.all.send_redirects=0
+      net.ipv4.conf.all.accept_source_route=0
+      net.ipv6.conf.all.accept_source_route=0
+      # Drop packets with a spoofed source address.
+      net.ipv4.conf.all.rp_filter=1
+      net.ipv4.conf.default.rp_filter=1
+      # Log packets with impossible addresses.
+      net.ipv4.conf.all.log_martians=1
+    mode: "0644"
+  notify: Apply kernel settings
+
+- name: Remove the old swappiness file (now in 60-rmx.conf)
+  ansible.builtin.file:
+    path: /etc/sysctl.d/60-swappiness.conf
+    state: absent

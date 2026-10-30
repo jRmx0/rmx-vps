@@ -1,0 +1,29 @@
+# Mosquitto can't start without its certificate, and Caddy gets it from
+# Let's Encrypt (needs DNS for mqtt.rmx.lt to point here and ports 80/443
+# open). Wait for it, copy it over, and carry on either way: the timer
+# retries twice a day, and Mosquitto restarts until the files are there.
+
+- name: Wait for Caddy's certificate for the MQTT name
+  ansible.builtin.shell: >
+    ls {{ services_dir }}/caddy/data/data/caddy/certificates/*/{{ mqtt_domain }}/{{ mqtt_domain }}.crt
+  register: mqtt_cert
+  until: mqtt_cert.rc == 0
+  retries: 24
+  delay: 5
+  changed_when: false
+  failed_when: false
+
+- name: No certificate yet
+  ansible.builtin.debug:
+    msg: >-
+      Caddy has no certificate for {{ mqtt_domain }} yet (DNS not pointing
+      here, or Let's Encrypt limits). Mosquitto will start once it exists:
+      check `docker compose logs caddy`, then `sudo systemctl start
+      rmx-mqtt-cert-sync.service` and `docker compose up -d`.
+  when: mqtt_cert.rc != 0
+
+- name: Copy the certificate to Mosquitto
+  ansible.builtin.command: /usr/local/sbin/rmx-mqtt-cert-sync
+  register: cert_sync
+  changed_when: "'Installed new certificate' in cert_sync.stdout"
+  when: mqtt_cert.rc == 0

@@ -1,0 +1,60 @@
+# sshd: keys only, no root, except root + password from the provider
+# dashboard. Host keys come from the vault, so a rebuilt server keeps its
+# identity (known_hosts on the PC, DEPLOY_KNOWN_HOSTS on GitHub).
+
+- name: Host keys from the vault (private)
+  ansible.builtin.copy:
+    dest: /etc/ssh/ssh_host_{{ item.type }}_key
+    content: "{{ item.private }}"
+    mode: "0600"
+  loop: "{{ vault_ssh_host_keys }}"
+  loop_control: { label: "{{ item.type }}" }
+  no_log: true
+  notify: Restart sshd
+
+- name: Host keys from the vault (public)
+  ansible.builtin.copy:
+    dest: /etc/ssh/ssh_host_{{ item.type }}_key.pub
+    content: "{{ item.public }}\n"
+    mode: "0644"
+  loop: "{{ vault_ssh_host_keys }}"
+  loop_control: { label: "{{ item.type }}" }
+  notify: Restart sshd
+
+# sshd -t needs it; with socket activation it only exists once sshd ran.
+- name: Sshd's runtime folder
+  ansible.builtin.file:
+    path: /run/sshd
+    state: directory
+    mode: "0755"
+
+- name: Sshd settings
+  ansible.builtin.template:
+    src: 00-rmx.conf.j2
+    dest: /etc/ssh/sshd_config.d/00-rmx.conf
+    mode: "0644"
+    validate: /usr/sbin/sshd -t -f %s
+  notify: Restart sshd
+
+- name: Settings from the hand-built server (now in 00-rmx.conf)
+  ansible.builtin.file:
+    path: /etc/ssh/sshd_config.d/00-hardening.conf
+    state: absent
+  notify: Restart sshd
+
+- name: Sshd main file
+  ansible.builtin.template:
+    src: sshd_config.j2
+    dest: /etc/ssh/sshd_config
+    mode: "0644"
+    validate: /usr/sbin/sshd -t -f %s
+  notify: Restart sshd
+
+- name: Old sshd backups from the hand-built setup
+  ansible.builtin.file:
+    path: /etc/ssh/{{ item }}
+    state: absent
+  loop:
+    - sshd_config.bak-pubkey-off
+    - sshd_config.bak-pre-hardening
+    - sshd_config.bak-pre-dashboard

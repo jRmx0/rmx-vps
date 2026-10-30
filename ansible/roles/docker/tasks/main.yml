@@ -1,0 +1,74 @@
+# Docker Engine + Compose plugin from Docker's own apt repo (not Ubuntu's
+# docker.io), with its signing key checked against the published fingerprint.
+
+- name: Keyrings folder
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    mode: "0755"
+
+- name: Docker's apt signing key
+  ansible.builtin.get_url:
+    url: https://download.docker.com/linux/ubuntu/gpg
+    dest: /etc/apt/keyrings/docker.asc
+    mode: "0644"
+  register: docker_key
+
+- name: Fingerprint of the downloaded key
+  ansible.builtin.shell: >
+    set -o pipefail;
+    gpg --show-keys --with-colons /etc/apt/keyrings/docker.asc | awk -F: '$1=="fpr"{print $10; exit}'
+  args: { executable: /bin/bash }
+  register: docker_key_fpr
+  changed_when: false
+  check_mode: false
+  when: not ansible_check_mode or not docker_key.changed
+
+- name: The key is Docker's
+  ansible.builtin.assert:
+    that: docker_key_fpr.stdout == docker_key_fingerprint
+    fail_msg: "Unexpected key fingerprint {{ docker_key_fpr.stdout }}; refusing to add the repo."
+    quiet: true
+  when: docker_key_fpr.stdout is defined
+
+- name: Docker's apt repo
+  ansible.builtin.copy:
+    dest: /etc/apt/sources.list.d/docker.sources
+    content: |
+      Types: deb
+      URIs: https://download.docker.com/linux/ubuntu
+      Suites: {{ ansible_facts['distribution_release'] }}
+      Components: stable
+      Signed-By: /etc/apt/keyrings/docker.asc
+    mode: "0644"
+
+- name: Docker Engine and Compose
+  ansible.builtin.apt:
+    name: [docker-ce, docker-ce-cli, containerd.io, docker-buildx-plugin, docker-compose-plugin]
+    state: present
+    update_cache: true
+
+- name: Docker daemon settings
+  ansible.builtin.copy:
+    dest: /etc/docker/daemon.json
+    content: |
+      {
+        "log-driver": "json-file",
+        "log-opts": { "max-size": "10m", "max-file": "3" }
+      }
+    mode: "0644"
+  notify: Restart docker
+
+- name: Docker running and on at boot
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    state: started
+    enabled: true
+  loop: [docker, containerd]
+
+# The docker group is effectively root; the admin user has sudo anyway.
+- name: Admin user may use docker without sudo
+  ansible.builtin.user:
+    name: "{{ admin_user }}"
+    groups: docker
+    append: true

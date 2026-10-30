@@ -1,0 +1,70 @@
+# ufw: deny everything incoming except public_ports. Rules that are not in
+# public_ports are removed, so `ufw status` is always exactly that list.
+# fail2ban: the sshd jail (on in Ubuntu's package defaults).
+
+- name: Ufw default policies
+  ansible.builtin.lineinfile:
+    path: /etc/default/ufw
+    regexp: "^{{ item.key }}="
+    line: '{{ item.key }}="{{ item.value }}"'
+  loop:
+    - { key: DEFAULT_INPUT_POLICY, value: DROP }
+    - { key: DEFAULT_OUTPUT_POLICY, value: ACCEPT }
+    - { key: DEFAULT_FORWARD_POLICY, value: DROP }
+  notify: Reload ufw
+
+- name: Open the public ports
+  ansible.builtin.command: ufw allow {{ item.port }}/tcp comment '{{ item.comment }}'
+  loop: "{{ public_ports }}"
+  register: ufw_allow
+  changed_when: "'Skipping' not in ufw_allow.stdout"
+
+- name: Rules ufw has now
+  ansible.builtin.command: ufw show added
+  register: ufw_added
+  changed_when: false
+  check_mode: false
+
+# "ufw show added" prints each rule as the command that made it, e.g.
+# "ufw allow 22/tcp comment 'SSH'"; anything not for a public port goes
+# (like the "ufw allow OpenSSH" of the hand-built server).
+- name: Remove rules that are not in public_ports
+  ansible.builtin.command: "ufw --force delete {{ item | regex_replace('^ufw ', '') }}"
+  loop: "{{ ufw_added.stdout_lines | select('match', '^ufw ') | reject('match', wanted) | list }}"
+  vars:
+    wanted: "^ufw allow ({{ public_ports | map(attribute='port') | join('|') }})/tcp( |$)"
+  changed_when: true
+
+- name: Is ufw on
+  ansible.builtin.command: ufw status
+  register: ufw_status
+  changed_when: false
+  check_mode: false
+
+- name: Ufw on (and at boot)
+  ansible.builtin.command: ufw --force enable
+  when: "'Status: active' not in ufw_status.stdout"
+
+- name: Fail2ban settings
+  ansible.builtin.copy:
+    dest: /etc/fail2ban/jail.d/rmx.local
+    content: |
+      # Managed by ansible (rmx-vps). The sshd jail itself is turned on by
+      # the package's defaults-debian.conf (backend systemd, nftables).
+      [DEFAULT]
+      # Never ban the provider dashboard's terminal bridge.
+      ignoreip = 127.0.0.1/8 ::1 {{ dashboard_ip }}
+    mode: "0644"
+  notify: Restart fail2ban
+
+- name: Settings from the hand-built server (now in rmx.local)
+  ansible.builtin.file:
+    path: /etc/fail2ban/jail.d/ignore-dashboard.local
+    state: absent
+  notify: Restart fail2ban
+
+- name: Fail2ban running and on at boot
+  ansible.builtin.systemd_service:
+    name: fail2ban
+    state: started
+    enabled: true

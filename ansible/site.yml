@@ -1,0 +1,25 @@
+# Empty Ubuntu 24.04 VPS -> RMX-SERVER. Safe to run again: it only changes
+# what differs. Run it with bootstrap.sh (see README.md in this folder).
+#
+#   bootstrap.sh                 apply
+#   bootstrap.sh --check --diff  show what would change, change nothing
+#   bootstrap.sh -e probe=on     also start the probe and create its app logins
+- name: RMX-SERVER
+  hosts: rmx-vps
+  pre_tasks:
+    - name: The vault is there (group_vars/all/vault.yml, see vault.yml.example)
+      ansible.builtin.assert:
+        that: vault_mosquitto_users is defined
+        fail_msg: >-
+          No secrets loaded. Create group_vars/all/vault.yml (template:
+          vault.yml.example, or export-vault.sh on the old server) and run
+          with the vault password.
+        quiet: true
+      tags: always
+  roles:
+    - { role: base, tags: base }
+    - { role: users, tags: users }
+    - { role: ssh, tags: ssh }
+    - { role: firewall, tags: firewall }
+    - { role: docker, tags: docker }
+    - { role: stack, tags: stack }

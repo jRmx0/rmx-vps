@@ -1,0 +1,26 @@
+# Managed by ansible (rmx-vps): roles/ssh. Edit there, not here.
+#
+# The settings are in sshd_config.d/00-rmx.conf. Files in sshd_config.d are
+# read first and the first value wins, so 00-rmx.conf beats anything a cloud
+# image drops in there later (e.g. a 50-cloud-init.conf with passwords on).
+Include /etc/ssh/sshd_config.d/*.conf
+
+UsePAM yes
+PrintMotd no
+AcceptEnv LANG LC_*
+Subsystem sftp /usr/lib/openssh/sftp-server
+
+# Match blocks must stay at the END of this file: in sshd_config.d they
+# would also capture every setting read after them.
+
+# GitHub Actions deploy user: its key already has "restrict"; this makes
+# sure no forwarding works for it even if the key line changes.
+Match User deploy
+    DisableForwarding yes
+    PermitTTY no
+
+# Provider dashboard web terminal (SSH bridge): root password from this IP only.
+Match Address {{ dashboard_ip }}
+    PermitRootLogin yes
+    PasswordAuthentication yes
+    KbdInteractiveAuthentication yes
