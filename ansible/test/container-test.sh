@@ -26,7 +26,7 @@ DOCKERFILE
 
 docker rm -f -v "$NAME" >/dev/null 2>&1 || true
 docker run -d --name "$NAME" --privileged --cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw \
-	--tmpfs /run --tmpfs /run/lock -v /var/lib/docker "$IMAGE" >/dev/null
+	--tmpfs /run --tmpfs /run/lock -v /var/lib/docker -v /var/lib/containerd "$IMAGE" >/dev/null
 for _ in $(seq 30); do
 	[[ $(ct 'systemctl is-system-running 2>/dev/null || true') =~ running|degraded ]] && break
 	sleep 1
