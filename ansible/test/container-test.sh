@@ -3,7 +3,7 @@
 # (systemd + Docker inside), then check that a second run changes nothing and
 # that --check sees a manual change. Needs Docker with --privileged.
 #   ansible/test/container-test.sh
-# Not covered: Let's Encrypt (no DNS), the swapfile, a real reboot, -e probe=on.
+# Not covered: the smoke test and Let's Encrypt (no DNS in a container), the swapfile, a real reboot, -e probe=on.
 set -euo pipefail
 
 REPO=$(cd "$(dirname "$0")/../.." && pwd)
@@ -41,7 +41,7 @@ docker exec "$NAME" cp /opt/rmx-vps/ansible/test/vault.yml /opt/rmx-vps/ansible/
 # The image drops its package lists after every apt run (docker-clean); a real VPS keeps them.
 ct 'rm -f /etc/apt/apt.conf.d/docker-clean; apt-get update -qq; apt-cache policy unattended-upgrades | grep -q Candidate'
 
-play() { ct "cd /opt/rmx-vps/ansible && ansible-playbook site.yml $*"; }
+play() { ct "cd /opt/rmx-vps/ansible && ansible-playbook site.yml --skip-tags smoke $*"; }
 
 echo "== run 1: from empty"
 if ! play >"$LOG" 2>&1; then
