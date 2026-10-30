@@ -34,7 +34,7 @@ Template with every field: [`group_vars/all/vault.yml.example`](group_vars/all/v
 2. Open the dashboard terminal (root) and run:
 
    ```bash
-   curl -fsSL https://raw.githubusercontent.com/jRmx0/rmx-vps/main/ansible/bootstrap.sh | bash
+   curl -fsSL https://raw.githubusercontent.com/jRmx0/rmx-vps/production/ansible/bootstrap.sh | bash
    ```
 
    It installs git and Ansible, clones this repo to `/opt/rmx-vps`, asks for the vault password and runs the playbook on the server itself. About 10 minutes.
@@ -59,10 +59,33 @@ Run it from the PC instead (WSL, or any Linux with Ansible): `ansible-playbook s
 
 Run `--check --diff` now and then. A difference means somebody changed the server by hand: either put it in the repo or let the next run undo it.
 
+## CI/CD (GitHub Actions)
+
+Branches: `feature/*` → PR → `development` → PR → `production`. Both stable branches are protected (PR only, the CI checks must pass); the server follows `production`.
+
+| When | What runs ([`ansible.yml`](../.github/workflows/ansible.yml), [`deploy.yml`](../.github/workflows/deploy.yml)) |
+|---|---|
+| every PR and push | syntax, ansible-lint, vault encrypted · `test/container-test.sh` builds the server from empty in a container, a second run must change nothing, `--check` must see a manual change · `test/db-roundtrip.sh` backs up and restores a throwaway TimescaleDB and a Mosquitto store |
+| push to `production` | encrypted backup → `ansible --check --diff` → `ansible apply` (with its own smoke test) → smoke test from outside |
+
+**Backup before every deploy.** The runner asks the server for a tar.gz (`/etc`, `/opt/rmx-vps` with its secrets and Mosquitto's `store/`, and a `pg_dump` of the probe database when it runs), encrypts it with `age` and uploads it as an artifact kept for 7 days. The server never sees the private key. Download one from the run's page, then on the PC: `age -d -i key.txt rmx-backup-xxxxxxx.tar.gz.age > backup.tar.gz`. Changes between the last deploy and a wipe are not in it.
+
+**Restore data** after a rebuild (the playbook rebuilds config; this puts the data back): copy `backup.tar.gz` to the server, start the probe (`./bootstrap.sh -e probe=on`), then `sudo rmx-ci restore backup.tar.gz`. It recreates the database from the dump with TimescaleDB's restore procedure and puts Mosquitto's store back. Mosquitto saves its store every 30 minutes, so retained messages can be that old.
+
+**One-time setup (the maintainer):**
+
+1. Create branches `development` and `production` from `main`; protect them (Settings → Branches: require a PR and the `check`, `db-roundtrip` and `container` checks). Add a `production` environment (Settings → Environments) limited to the `production` branch.
+2. `ssh-keygen -t ed25519 -N "" -C rmx-vps-ci -f ci_key`. Put the **public** half in the vault as `vault_ci_ssh_key`, the **private** half in the environment secret `CI_SSH_KEY`, then delete both files.
+3. `age-keygen -o age.key` on the PC: the public key (`age1…`) is the secret `AGE_PUBLIC_KEY`; keep `age.key` in the password manager.
+4. `VAULT_PASSWORD` = the Ansible Vault password; `CI_KNOWN_HOSTS` = `45.81.252.43 ` + the first two fields of `/etc/ssh/ssh_host_ed25519_key.pub`.
+5. Apply once by hand (`./bootstrap.sh`) so the `ci` user and `rmx-ci` exist, and so the server's clone follows `production`: `git -C /opt/rmx-vps fetch && git -C /opt/rmx-vps checkout production`.
+
+**What the CI key can do.** Its `authorized_keys` line forces `sudo rmx-ci "$SSH_ORIGINAL_COMMAND"`, and sudoers only allows `backup`, `check:<40 hex>` and `apply:<40 hex>`: no shell, no forwarding. `apply` first checks that the commit is on `origin/production`. Still, whoever can push to `production` or edit the workflow can run any playbook as root, so branch protection is the real boundary. If a bad deploy locks you out: provider dashboard terminal (root), fix and `./bootstrap.sh`, or reinstall and run `bootstrap.sh`.
+
 ## What it does not do
 
 - Create or reinstall the VPS, DNS records, GitHub secrets, the device firmware: all outside the server.
-- Restore **data**: the probe database and Mosquitto's retained messages start empty after a reinstall (by choice, see the CHANGELOG).
+- Restore **data** by itself: after a reinstall the probe database and Mosquitto's retained messages start empty until you run `rmx-ci restore` with a backup (see CI/CD above).
 - Remove things you delete from the playbook. A deleted task leaves its result on the server; add an explicit `state: absent` first, or reinstall.
 - Passwords of existing Mosquitto logins: it adds missing logins only (salted hashes can't be compared). To change one, edit the vault and run with `-e reset_mqtt_passwords=true`.
 - Probe: the database password only takes effect when the database is first created; the app logins only when you run with `-e probe=on`.

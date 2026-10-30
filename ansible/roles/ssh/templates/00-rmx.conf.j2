@@ -6,4 +6,4 @@ KbdInteractiveAuthentication no
 PermitRootLogin no
 X11Forwarding no
 # Only these may log in at all; root only from the provider dashboard.
-AllowUsers {{ admin_user }} deploy root@{{ dashboard_ip }}
+AllowUsers {{ admin_user }} deploy{{ ' ci' if vault_ci_ssh_key | default('') | length > 0 else '' }} root@{{ dashboard_ip }}

@@ -619,9 +619,9 @@ Then on the server, replace the key part of the one line in `/home/deploy/.ssh/a
 
 ```bash
 # empty Ubuntu 24.04 VPS, as root (provider dashboard terminal):
-curl -fsSL https://raw.githubusercontent.com/jRmx0/rmx-vps/main/ansible/bootstrap.sh | bash
+curl -fsSL https://raw.githubusercontent.com/jRmx0/rmx-vps/production/ansible/bootstrap.sh | bash
 # later, on the server: preview, then apply
 cd /opt/rmx-vps/ansible && ./bootstrap.sh --check --diff && ./bootstrap.sh
 ```
 
-Full runbook and limits: [`ansible/README.md`](ansible/README.md). Once the live server has been rebuilt this way, change the server only through this repo; `config/` then documents what Ansible writes (it is no longer pulled from the server, §9).
+Branches are `feature/*` → `development` → `production`; a push to `production` backs up (encrypted), checks and applies the playbook automatically, and CI builds the server from empty in a container on every PR. Details, one-time setup and restore: [`ansible/README.md`](ansible/README.md#cicd-github-actions). Full runbook and limits: [`ansible/README.md`](ansible/README.md). Once the live server has been rebuilt this way, change the server only through this repo; `config/` then documents what Ansible writes (it is no longer pulled from the server, §9).

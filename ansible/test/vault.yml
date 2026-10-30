@@ -1,0 +1,20 @@
+# Made-up secrets for container-test.sh and CI only. The real vault is
+# ../group_vars/all/vault.yml (encrypted); nothing here opens anything.
+vault_ssh_host_keys: []
+vault_mosquitto_users:
+  app: test-only
+  mower-01: test-only
+  probe-app: test-only
+  probe-device: test-only
+vault_caddy_fw_users:
+  - name: probe-device
+    password: test-only
+    hash: $2a$14$poDv4C58sAS6guLjjf2xou.OeDfA2Vsh7dT6CU8ygb64XglMt9aAu
+vault_probe_db_password: testonly
+vault_probe_tag: sha-0000000
+vault_probe_app_users:
+  probe: test-only
+  probe-device: test-only
+vault_deploy_ssh_key: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMadeUpKeyForTestsOnlyMadeUpKeyForTestsOnly0 test
+vault_ci_ssh_key: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMadeUpKeyForTestsOnlyMadeUpKeyForTestsOnly1 test
+vault_github_deploy_key: ""
