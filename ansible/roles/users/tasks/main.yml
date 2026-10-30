@@ -77,7 +77,7 @@
 # Same pattern as deploy: no password, not in sudo or docker, one key that
 # may only run rmx-ci with backup, check:<sha> or apply:<sha> (sudoers checks
 # the argument too). Created only when the vault has a key for it.
-- name: rmx-ci script (backup, deploy, restore)
+- name: The rmx-ci script (backup, deploy, restore)
   ansible.builtin.copy:
     src: "{{ repo_src }}/ansible/ci/rmx-ci.sh"
     dest: /usr/local/sbin/rmx-ci
