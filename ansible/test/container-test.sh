@@ -41,6 +41,11 @@ docker exec "$NAME" cp /opt/rmx-vps/ansible/test/vault.yml /opt/rmx-vps/ansible/
 # The image drops its package lists after every apt run (docker-clean); a real VPS keeps them.
 ct 'rm -f /etc/apt/apt.conf.d/docker-clean; apt-get update -qq; apt-cache policy unattended-upgrades | grep -q Candidate'
 
+# No DNS here, so Caddy can't get a certificate and Mosquitto would restart
+# forever (every run "starts" it again). Give it a self-signed one where Caddy keeps its own.
+ct 'd=/opt/rmx-vps/services/caddy/data/data/caddy/certificates/test/mqtt.rmx.lt && mkdir -p $d &&
+	openssl req -x509 -newkey rsa:2048 -nodes -days 2 -subj /CN=mqtt.rmx.lt -keyout $d/mqtt.rmx.lt.key -out $d/mqtt.rmx.lt.crt 2>/dev/null'
+
 play() { ct "cd /opt/rmx-vps/ansible && ansible-playbook site.yml --skip-tags smoke $*"; }
 
 echo "== run 1: from empty"

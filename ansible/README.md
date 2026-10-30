@@ -70,7 +70,7 @@ Branches: `feature/*` → PR → `development` → PR → `production`. Both sta
 
 **Backup before every deploy.** The runner asks the server for a tar.gz (`/etc`, `/opt/rmx-vps` with its secrets and Mosquitto's `store/`, and a `pg_dump` of the probe database when it runs), encrypts it with `age` and uploads it as an artifact kept for 7 days. The server never sees the private key. Download one from the run's page, then on the PC: `age -d -i key.txt rmx-backup-xxxxxxx.tar.gz.age > backup.tar.gz`. Changes between the last deploy and a wipe are not in it.
 
-**Restore data** after a rebuild (the playbook rebuilds config; this puts the data back): copy `backup.tar.gz` to the server, start the probe (`./bootstrap.sh -e probe=on`), then `sudo rmx-ci restore backup.tar.gz`. It recreates the database from the dump with TimescaleDB's restore procedure and puts Mosquitto's store back. Mosquitto saves its store every 30 minutes, so retained messages can be that old.
+**Restore data** after a rebuild (the playbook rebuilds config; this puts the data back): copy `backup.tar.gz` to the server, start the probe (`./bootstrap.sh -e probe=on`), then `sudo rmx-ci restore backup.tar.gz`. It recreates the database from the dump with TimescaleDB's restore procedure and puts Mosquitto's store back. Mosquitto saves its store every 5 minutes, so retained messages can be that old.
 
 **One-time setup (the maintainer):**
 
