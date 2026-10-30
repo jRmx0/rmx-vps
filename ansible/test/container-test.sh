@@ -37,6 +37,9 @@ tar -C "$REPO" --exclude=.git -cf - . | docker exec -i "$NAME" tar -C /opt/rmx-v
 ct 'chown -R rmx:rmx /opt/rmx-vps'
 docker exec "$NAME" cp /opt/rmx-vps/ansible/test/vault.yml /opt/rmx-vps/ansible/group_vars/all/vault.yml
 
+# The image drops its package lists after every apt run (docker-clean); a real VPS keeps them.
+ct 'rm -f /etc/apt/apt.conf.d/docker-clean; apt-get update -qq; apt-cache policy unattended-upgrades | grep -q Candidate'
+
 play() { ct "cd /opt/rmx-vps/ansible && ansible-playbook site.yml $*"; }
 
 echo "== run 1: from empty"
