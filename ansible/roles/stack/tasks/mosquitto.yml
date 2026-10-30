@@ -77,6 +77,8 @@
       - docker
       - run
       - --rm
+      - --network
+      - none
       - -v
       - "{{ services_dir }}/mosquitto/data/auth:/mosquitto/auth"
       - --user

@@ -9,7 +9,8 @@ set -euo pipefail
 REPO=$(cd "$(dirname "$0")/../.." && pwd)
 NAME=rmx-test
 IMAGE=rmx-test-base
-trap 'docker rm -f -v "$NAME" >/dev/null 2>&1 || true' EXIT
+LOG=$(mktemp)
+trap 'docker rm -f -v "$NAME" >/dev/null 2>&1 || true; rm -f "$LOG"' EXIT
 
 ct() { docker exec "$NAME" bash -c "$*"; }
 
@@ -43,7 +44,13 @@ ct 'rm -f /etc/apt/apt.conf.d/docker-clean; apt-get update -qq; apt-cache policy
 play() { ct "cd /opt/rmx-vps/ansible && ansible-playbook site.yml $*"; }
 
 echo "== run 1: from empty"
-play | tail -30
+if ! play >"$LOG" 2>&1; then
+	tail -40 "$LOG"
+	echo "== diagnostics" >&2
+	ct 'docker run --rm --network none -v /tmp:/x --user 1883 eclipse-mosquitto:2.1-alpine id; journalctl -u docker -n 20 --no-pager' 2>&1 | tail -30 || true
+	exit 1
+fi
+tail -30 "$LOG"
 echo "== run 2: must change nothing"
 second=$(play | tee /dev/stderr)
 grep -Eq 'changed=0 .*failed=0' <<<"$second" || { echo "FAIL: second run changed something" >&2; exit 1; }
