@@ -16,6 +16,8 @@
 
 > No secrets in this repo: no passwords, private keys or tokens. `.gitignore` blocks common key files.
 
+**Setup as code:** [`ansible/`](ansible/) rebuilds this whole server from an empty Ubuntu 24.04 VPS with one command, and re-applies it safely later (see [§11](#11-setup-as-code-ansible)). The sections below remain the record of what the server is and how it got here.
+
 ---
 
 ## 1. How to connect
@@ -608,3 +610,18 @@ Then on the server, replace the key part of the one line in `/home/deploy/.ssh/a
 | Remove the probe completely | See [Probe → Remove](#remove) |
 | Delete Caddy's certificates and state | `sudo rm -rf /opt/rmx-vps/services/caddy/data` (after `down`) |
 | Remove Docker completely | `docker compose down`, then `sudo apt purge docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin docker-ce-rootless-extras`, `sudo rm -rf /var/lib/docker /var/lib/containerd /etc/docker /etc/apt/sources.list.d/docker.sources /etc/apt/keyrings/docker.asc`, `sudo gpasswd -d rmx docker` |
+
+---
+
+## 11. Setup as code (Ansible)
+
+[`ansible/`](ansible/) describes everything in §3–§10 as code: users, sshd, ufw, fail2ban, swap, unattended security updates, Docker, the Compose stack and its server-only files, cert-sync and the deploy script. Its secrets (SSH host keys, Mosquitto and probe passwords, `/fw/` logins, deploy key) are in `ansible/group_vars/all/vault.yml`, encrypted with Ansible Vault.
+
+```bash
+# empty Ubuntu 24.04 VPS, as root (provider dashboard terminal):
+curl -fsSL https://raw.githubusercontent.com/jRmx0/rmx-vps/main/ansible/bootstrap.sh | bash
+# later, on the server: preview, then apply
+cd /opt/rmx-vps/ansible && ./bootstrap.sh --check --diff && ./bootstrap.sh
+```
+
+Full runbook and limits: [`ansible/README.md`](ansible/README.md). Once the live server has been rebuilt this way, change the server only through this repo; `config/` then documents what Ansible writes (it is no longer pulled from the server, §9).

@@ -1,0 +1,74 @@
+# The admin user (rmx) and the deploy user for GitHub Actions.
+
+- name: Admin user
+  ansible.builtin.user:
+    name: "{{ admin_user }}"
+    shell: /bin/bash
+    groups: sudo
+    append: true
+    password: "!"
+    update_password: on_create
+
+- name: Admin user's .ssh folder
+  ansible.builtin.file:
+    path: "/home/{{ admin_user }}/.ssh"
+    state: directory
+    owner: "{{ admin_user }}"
+    group: "{{ admin_user }}"
+    mode: "0700"
+
+- name: Admin user's SSH keys (only these)
+  ansible.builtin.copy:
+    dest: "/home/{{ admin_user }}/.ssh/authorized_keys"
+    content: "{{ admin_ssh_keys | join('\n') }}\n"
+    owner: "{{ admin_user }}"
+    group: "{{ admin_user }}"
+    mode: "0600"
+
+- name: Admin user may sudo without a password (it has no password)
+  ansible.builtin.copy:
+    dest: /etc/sudoers.d/{{ admin_user }}
+    content: "{{ admin_user }} ALL=(ALL) NOPASSWD:ALL\n"
+    mode: "0440"
+    validate: visudo -cf %s
+
+- name: No key logs in as root
+  ansible.builtin.file:
+    path: /root/.ssh/authorized_keys
+    state: absent
+
+# --- deploy: GitHub Actions of rmx-backend-probe (README §10 "Auto-deploy")
+# No password, not in sudo or docker. Its one key may only run the deploy
+# script, with one argument shaped like sha-<7 hex> (checked by sudoers too).
+# The shell is bash only because sshd runs forced commands through it.
+- name: Deploy user
+  ansible.builtin.user:
+    name: deploy
+    shell: /bin/bash
+    password: "!"
+    update_password: on_create
+
+- name: Deploy user's .ssh folder
+  ansible.builtin.file:
+    path: /home/deploy/.ssh
+    state: directory
+    owner: deploy
+    group: deploy
+    mode: "0700"
+
+- name: Deploy key, limited to the deploy command
+  ansible.builtin.copy:
+    dest: /home/deploy/.ssh/authorized_keys
+    content: >
+      restrict,command="sudo -n /usr/local/sbin/rmx-deploy-probe \"$SSH_ORIGINAL_COMMAND\""
+      {{ vault_deploy_ssh_key }}
+    owner: deploy
+    group: deploy
+    mode: "0600"
+
+- name: Deploy user may run the deploy script, nothing else
+  ansible.builtin.copy:
+    src: "{{ repo_src }}/services/probe/deploy/sudoers-deploy"
+    dest: /etc/sudoers.d/deploy
+    mode: "0440"
+    validate: visudo -cf %s

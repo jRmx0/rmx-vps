@@ -1,0 +1,9 @@
+# Managed by ansible (rmx-vps): roles/ssh. Read before every other sshd
+# setting, so these win. Exceptions: the Match blocks in /etc/ssh/sshd_config.
+PubkeyAuthentication yes
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PermitRootLogin no
+X11Forwarding no
+# Only these may log in at all; root only from the provider dashboard.
+AllowUsers {{ admin_user }} deploy root@{{ dashboard_ip }}

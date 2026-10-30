@@ -1,0 +1,29 @@
+name: ansible
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: The vault, if present, is encrypted
+        run: |
+          f=ansible/group_vars/all/vault.yml
+          if [ -f "$f" ] && ! head -1 "$f" | grep -q '^\$ANSIBLE_VAULT;'; then
+            echo "::error file=$f::vault.yml is not encrypted (run: ansible-vault encrypt $f)"
+            exit 1
+          fi
+
+      - name: Install ansible-core and ansible-lint
+        run: pipx install ansible-core==2.16.* && pipx install ansible-lint && pipx inject ansible-lint ansible-core==2.16.* --force
+
+      - name: Syntax and lint
+        working-directory: ansible
+        run: |
+          ansible-playbook --syntax-check site.yml
+          ansible-lint site.yml

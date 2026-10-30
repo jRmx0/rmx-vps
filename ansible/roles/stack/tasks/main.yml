@@ -1,0 +1,44 @@
+# The Docker Compose stack in services/ (Caddy, Mosquitto, the probe), its
+# server-only files written from the vault, and the host helpers it needs.
+
+- name: Repo
+  ansible.builtin.import_tasks: repo.yml
+
+- name: Caddy files
+  ansible.builtin.import_tasks: caddy.yml
+
+- name: Mosquitto files
+  ansible.builtin.import_tasks: mosquitto.yml
+
+- name: Probe files
+  ansible.builtin.import_tasks: probe.yml
+
+# Caddy first: it fetches the certificate Mosquitto needs to start.
+- name: Start Caddy
+  ansible.builtin.command: docker compose up -d caddy
+  args: { chdir: "{{ services_dir }}" }
+  register: caddy_up
+  changed_when: caddy_up.stderr is search('Created|Recreated|Started')
+  when: not ansible_check_mode
+
+- name: Certificate for Mosquitto
+  ansible.builtin.import_tasks: mqtt-cert.yml
+
+- name: Start the rest of the stack
+  ansible.builtin.command: docker compose up -d
+  args: { chdir: "{{ services_dir }}" }
+  register: compose_up
+  changed_when: compose_up.stderr is search('Created|Recreated|Started')
+  when: not ansible_check_mode
+
+- name: Probe on, with its app logins (-e probe=on)
+  ansible.builtin.import_tasks: probe-on.yml
+  when: probe == "on" and not ansible_check_mode
+
+- name: Apply config changes before the checks
+  ansible.builtin.meta: flush_handlers
+
+- name: Smoke test
+  ansible.builtin.import_tasks: smoke-test.yml
+  when: not ansible_check_mode
+  tags: smoke

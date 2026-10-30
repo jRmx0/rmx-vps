@@ -1,0 +1,81 @@
+# This repo at /opt/rmx-vps, owned by the admin user (bootstrap.sh cloned it).
+# Runtime data and secrets inside it (services/*/data, caddy/private) stay
+# owned by root or the service; they are gitignored.
+
+- name: Clone the repo (when run from another machine)
+  ansible.builtin.git:
+    repo: "{{ repo_url }}"
+    dest: "{{ repo_dir }}"
+    update: false
+  become: true
+  become_user: "{{ admin_user }}"
+  when: target | default('local') == 'remote'
+
+- name: Repo files owned by the admin user
+  ansible.builtin.command: >
+    find {{ repo_dir }}
+    \( -path '{{ services_dir }}/*/data' -o -path '{{ services_dir }}/caddy/private' \) -prune
+    -o ! -user {{ admin_user }} -print -exec chown -h {{ admin_user }}:{{ admin_user }} {} +
+  register: repo_chown
+  changed_when: repo_chown.stdout != ''
+
+- name: Root may run git in the admin user's repo
+  ansible.builtin.copy:
+    dest: /etc/gitconfig
+    content: |
+      [safe]
+          directory = {{ repo_dir }}
+    mode: "0644"
+
+- name: ~/VPS-SETUP.md shows the README
+  ansible.builtin.file:
+    src: "{{ repo_dir }}/README.md"
+    dest: "{{ item }}/VPS-SETUP.md"
+    state: link
+    force: true
+  loop: [/root, "/home/{{ admin_user }}"]
+
+# Optional push access from the server (README §9), with a deploy key that
+# can write to this repo only.
+- name: Push access from the server
+  when: vault_github_deploy_key | length > 0
+  block:
+    - name: GitHub deploy key
+      ansible.builtin.copy:
+        dest: /home/{{ admin_user }}/.ssh/github-rmx-vps
+        content: "{{ vault_github_deploy_key }}"
+        owner: "{{ admin_user }}"
+        group: "{{ admin_user }}"
+        mode: "0600"
+      no_log: true
+
+    - name: SSH alias for the deploy key
+      ansible.builtin.copy:
+        dest: /home/{{ admin_user }}/.ssh/config
+        content: |
+          Host github-rmx-vps
+              HostName github.com
+              User git
+              IdentityFile ~/.ssh/github-rmx-vps
+              IdentitiesOnly yes
+        owner: "{{ admin_user }}"
+        group: "{{ admin_user }}"
+        mode: "0600"
+
+    - name: GitHub's host key
+      ansible.builtin.known_hosts:
+        path: /home/{{ admin_user }}/.ssh/known_hosts
+        name: github.com
+        key: github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl
+      become: true
+      become_user: "{{ admin_user }}"
+
+    - name: Push over SSH with that key, and the commit identity
+      ansible.builtin.command: git -C {{ repo_dir }} config --local {{ item.name }} {{ item.value }}
+      loop:
+        - { name: remote.origin.url, value: "git@github-rmx-vps:jRmx0/rmx-vps.git" }
+        - { name: user.name, value: jRmx0 }
+        - { name: user.email, value: "116594512+jRmx0@users.noreply.github.com" }
+      become: true
+      become_user: "{{ admin_user }}"
+      changed_when: false
