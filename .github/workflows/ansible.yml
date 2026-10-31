@@ -3,7 +3,7 @@ name: ansible
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, development, production]
 
 jobs:
   check:
@@ -27,3 +27,18 @@ jobs:
         run: |
           ansible-playbook --syntax-check site.yml
           ansible-lint site.yml
+
+  # Backup and restore of the database and Mosquitto's store, against a throwaway TimescaleDB.
+  db-roundtrip:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo ansible/test/db-roundtrip.sh
+
+  # The whole server from empty in a container; a second run must change nothing.
+  container:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - run: ansible/test/container-test.sh

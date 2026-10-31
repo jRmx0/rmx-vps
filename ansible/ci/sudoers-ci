@@ -1,0 +1,4 @@
+# /etc/sudoers.d/ci (root:root 0440). The "ci" user may run exactly one
+# script as root, with one of three arguments (sudo regex, sudo 1.9.10+).
+# GitHub Actions can't ask for anything else, whatever it sends over ssh.
+ci ALL=(root) NOPASSWD: /usr/local/sbin/rmx-ci ^backup$, /usr/local/sbin/rmx-ci ^check:[0-9a-f]{40}$, /usr/local/sbin/rmx-ci ^apply:[0-9a-f]{40}$

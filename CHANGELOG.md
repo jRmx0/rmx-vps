@@ -4,6 +4,17 @@ Newest entries at the top. Times in UTC. For each change, record **what**, **why
 
 ---
 
+## 2026-10-30 — CI/CD: development → production, automatic deploy with encrypted backup (not applied yet)
+
+- *Why:* Justas wants merges to deploy the server by themselves, with a backup first, and CI to prove the playbook builds a server from empty. Issue #9.
+- *Added:* `.github/workflows/deploy.yml` (push to `production`: backup → `--check --diff` → apply → smoke test); `ansible.yml` gains `container` (server from empty twice, drift visible) and `db-roundtrip` (backup/restore of TimescaleDB and the Mosquitto store); `ansible/ci/rmx-ci.sh` (`backup`, `check:<sha>`, `apply:<sha>`, `restore`) and `sudoers-ci`; user `ci` with a forced-command key (only when `vault_ci_ssh_key` is set); `repo_branch: production` (bootstrap.sh and the clone follow it).
+- *Backup:* config + `pg_dump` + Mosquitto store, encrypted on the runner with `age` (the private key stays on the PC), artifact kept 7 days. Data restore: `sudo rmx-ci restore`.
+- *Tested:* `db-roundtrip.sh` and `container-test.sh` run here; the workflows, branch protection and the real deploy are untested until the secrets and branches exist.
+- *Applied:* nothing on the live server. Setup steps: `ansible/README.md` → CI/CD.
+- *Undo:* revert the PR; on the server `sudo userdel -r ci; sudo rm /etc/sudoers.d/ci /usr/local/sbin/rmx-ci`.
+
+---
+
 ## 2026-10-30 — Setup as code: Ansible playbook + vault (not applied to the live server yet)
 
 - *Why:* the server was built by hand, so what it is lived in this log and in memory. The goal is a lean server that can be rebuilt from empty and where nothing done by hand lingers. Justas chose Ansible + Ansible Vault, and a rebuild by reinstalling the VPS (nothing real runs on it, so downtime is fine; database data is not kept).

@@ -72,3 +72,50 @@
     dest: /etc/sudoers.d/deploy
     mode: "0440"
     validate: visudo -cf %s
+
+# --- ci: GitHub Actions of this repo (deploy.yml, README §11 "CI/CD")
+# Same pattern as deploy: no password, not in sudo or docker, one key that
+# may only run rmx-ci with backup, check:<sha> or apply:<sha> (sudoers checks
+# the argument too). Created only when the vault has a key for it.
+- name: The rmx-ci script (backup, deploy, restore)
+  ansible.builtin.copy:
+    src: "{{ repo_src }}/ansible/ci/rmx-ci.sh"
+    dest: /usr/local/sbin/rmx-ci
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: CI user
+  when: vault_ci_ssh_key | default('') | length > 0
+  block:
+    - name: CI user
+      ansible.builtin.user:
+        name: ci
+        shell: /bin/bash
+        password: "!"
+        update_password: on_create
+
+    - name: CI user's .ssh folder
+      ansible.builtin.file:
+        path: /home/ci/.ssh
+        state: directory
+        owner: ci
+        group: ci
+        mode: "0700"
+
+    - name: CI key, limited to the rmx-ci command
+      ansible.builtin.copy:
+        dest: /home/ci/.ssh/authorized_keys
+        content: >
+          restrict,command="sudo -n /usr/local/sbin/rmx-ci \"$SSH_ORIGINAL_COMMAND\""
+          {{ vault_ci_ssh_key }}
+        owner: ci
+        group: ci
+        mode: "0600"
+
+    - name: CI user may run rmx-ci, nothing else
+      ansible.builtin.copy:
+        src: "{{ repo_src }}/ansible/ci/sudoers-ci"
+        dest: /etc/sudoers.d/ci
+        mode: "0440"
+        validate: visudo -cf %s

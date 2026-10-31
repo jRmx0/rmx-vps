@@ -1,0 +1,81 @@
+name: deploy
+
+# Every push to `production` (a merged PR from `development`): encrypted backup,
+# ansible --check --diff, ansible apply, then the server is probed from outside.
+# Secrets (repository settings -> Environments -> production):
+#   CI_SSH_KEY       private key of the `ci` user (public half: vault_ci_ssh_key)
+#   CI_KNOWN_HOSTS   one line: `45.81.252.43 ssh-ed25519 AAAA...` (the server's host key)
+#   VAULT_PASSWORD   the Ansible Vault password
+#   AGE_PUBLIC_KEY   `age1...`; the private half stays on the maintainer's PC
+on:
+  push:
+    branches: [production]
+
+# One deploy at a time; a newer push waits instead of cancelling a running apply.
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  SERVER: 45.81.252.43
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    environment: production
+    timeout-minutes: 30
+    steps:
+      - name: ssh to the server as the ci user
+        env:
+          CI_SSH_KEY: ${{ secrets.CI_SSH_KEY }}
+          CI_KNOWN_HOSTS: ${{ secrets.CI_KNOWN_HOSTS }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$CI_SSH_KEY" >~/.ssh/ci_key
+          printf '%s\n' "$CI_KNOWN_HOSTS" >~/.ssh/known_hosts
+          chmod 600 ~/.ssh/ci_key
+          cat >~/.ssh/config <<CONF
+          Host server
+              HostName $SERVER
+              User ci
+              IdentityFile ~/.ssh/ci_key
+              IdentitiesOnly yes
+              StrictHostKeyChecking yes
+              ServerAliveInterval 30
+          CONF
+
+      - name: Encrypted backup (config, database dump, Mosquitto store)
+        env:
+          AGE_PUBLIC_KEY: ${{ secrets.AGE_PUBLIC_KEY }}
+        run: |
+          set -o pipefail
+          sudo apt-get install -y -qq age >/dev/null
+          ssh server backup | age -r "$AGE_PUBLIC_KEY" -o "rmx-backup-${GITHUB_SHA::7}.tar.gz.age"
+          test "$(stat -c %s "rmx-backup-${GITHUB_SHA::7}.tar.gz.age")" -gt 10000
+
+      # Encrypted, so a public repo's artifact (readable by any signed-in GitHub user) leaks nothing.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rmx-backup-${{ github.sha }}
+          path: rmx-backup-*.tar.gz.age
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: ansible --check --diff
+        env:
+          VAULT_PASSWORD: ${{ secrets.VAULT_PASSWORD }}
+        run: printf '%s\n' "$VAULT_PASSWORD" | ssh server "check:$GITHUB_SHA"
+
+      - name: ansible apply (includes the server's own smoke test)
+        env:
+          VAULT_PASSWORD: ${{ secrets.VAULT_PASSWORD }}
+        run: printf '%s\n' "$VAULT_PASSWORD" | ssh server "apply:$GITHUB_SHA"
+
+      - name: Smoke test from outside
+        run: |
+          curl -fsS --retry 6 --retry-delay 5 -o /dev/null https://rmx.lt/
+          curl -fsS --retry 6 --retry-delay 5 -o /dev/null https://api.rmx.lt/
+          echo | openssl s_client -connect mqtt.rmx.lt:8883 -servername mqtt.rmx.lt -verify_return_error -brief 2>&1 | grep -q 'Verification: OK'
