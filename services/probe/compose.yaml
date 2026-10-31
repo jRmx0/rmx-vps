@@ -1,4 +1,4 @@
-# rmx-backend-probe: a learning/diagnostic app (github.com/jRmx0/rmx-backend-probe)
+# rmx-backend-probe: a learning/diagnostic app (github.com/rmx-lt/rmx-backend-probe)
 # and a rehearsal of the production deploy. See README §10 "Probe".
 #
 # Compose profile "probe": OFF by default. A plain `docker compose up -d`
@@ -66,7 +66,7 @@ services:
       start_period: 30s
 
   probe-app:
-    image: ghcr.io/jrmx0/rmx-backend-probe:${PROBE_TAG}
+    image: ghcr.io/rmx-lt/rmx-backend-probe:${PROBE_TAG}
     container_name: probe-app
     profiles: [probe]
     restart: unless-stopped

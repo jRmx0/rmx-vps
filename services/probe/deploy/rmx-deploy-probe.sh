@@ -19,7 +19,7 @@ umask 077
 SERVICES=/opt/rmx-vps/services
 # Holds the passwords and PROBE_TAG; only the PROBE_TAG line is rewritten.
 ENV_FILE=$SERVICES/probe/.env
-IMAGE=ghcr.io/jrmx0/rmx-backend-probe
+IMAGE=ghcr.io/rmx-lt/rmx-backend-probe
 LOG=/var/log/rmx-deploy-probe.log
 HEALTH_TIMEOUT=90
 
@@ -94,7 +94,7 @@ compose up -d --no-deps probe-app
 if wait_healthy; then
 	log "OK $TAG: probe-app healthy"
 	# Remove old probe images (the running one is kept; a rollback re-pulls).
-	docker image prune -af --filter "label=org.opencontainers.image.source=https://github.com/jRmx0/rmx-backend-probe" >/dev/null || true
+	docker image prune -af --filter "label=org.opencontainers.image.source=https://github.com/rmx-lt/rmx-backend-probe" >/dev/null || true
 	exit 0
 fi
 
