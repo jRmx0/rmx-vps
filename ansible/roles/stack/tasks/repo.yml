@@ -28,15 +28,14 @@
           directory = {{ repo_dir }}
     mode: "0644"
 
-- name: ~/VPS-SETUP.md shows the README
+# The docs moved to the wiki (2026-10-31); remove the old README symlink.
+- name: ~/VPS-SETUP.md is gone
   ansible.builtin.file:
-    src: "{{ repo_dir }}/README.md"
-    dest: "{{ item }}/VPS-SETUP.md"
-    state: link
-    force: true
+    path: "{{ item }}/VPS-SETUP.md"
+    state: absent
   loop: [/root, "/home/{{ admin_user }}"]
 
-# Optional push access from the server (README §9), with a deploy key that
+# Optional push access from the server (wiki Server §9), with a deploy key that
 # can write to this repo only.
 - name: Push access from the server
   when: vault_github_deploy_key | length > 0
