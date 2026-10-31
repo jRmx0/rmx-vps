@@ -34,7 +34,7 @@ Template with every field: [`group_vars/all/vault.yml.example`](group_vars/all/v
 2. Open the dashboard terminal (root) and run:
 
    ```bash
-   curl -fsSL https://raw.githubusercontent.com/jRmx0/rmx-vps/production/ansible/bootstrap.sh | bash
+   curl -fsSL https://raw.githubusercontent.com/rmx-lt/rmx-vps/production/ansible/bootstrap.sh | bash
    ```
 
    It installs git and Ansible, clones this repo to `/opt/rmx-vps`, asks for the vault password and runs the playbook on the server itself. About 10 minutes.

@@ -4,6 +4,15 @@ Newest entries at the top. Times in UTC. For each change, record **what**, **why
 
 ---
 
+## 2026-10-31 — Repos moved to the `rmx-lt` organization: probe image from `ghcr.io/rmx-lt` (not applied yet)
+
+- *Why:* the project repos moved from `jRmx0` to the `rmx-lt` organization. GitHub redirects repo URLs, but GHCR packages don't move, so rmx-backend-probe now publishes `ghcr.io/rmx-lt/rmx-backend-probe` (rmx-backend-probe#16). Issue #11, parent rmx-lt/blade-of-grass#1.
+- *Changed:* `services/probe/compose.yaml` image; `rmx-deploy-probe.sh` `IMAGE` and the prune filter (label `org.opencontainers.image.source=https://github.com/rmx-lt/rmx-backend-probe`); repo URLs in the README, `ansible/bootstrap.sh`, `group_vars` `repo_url` and the server remote in `roles/stack/tasks/repo.yml`. Older entries below keep the old URLs as history.
+- *Apply (before rmx-backend-probe#17 merges):* `sudo -u rmx git -C /opt/rmx-vps remote set-url origin git@github-rmx-vps:rmx-lt/rmx-vps.git`, `sudo -u rmx git -C /opt/rmx-vps pull --ff-only`, `sudo install -m 0755 /opt/rmx-vps/services/probe/deploy/rmx-deploy-probe.sh /usr/local/sbin/rmx-deploy-probe`. After the first good `rmx-lt` deploy: `docker image prune -af --filter "label=org.opencontainers.image.source=https://github.com/jRmx0/rmx-backend-probe"`.
+- *Undo:* revert this commit, reinstall the script, deploy an old `jrmx0` tag by hand (`sudo rmx-deploy-probe sha-…`).
+
+---
+
 ## 2026-10-30 — CI/CD: development → production, automatic deploy with encrypted backup (not applied yet)
 
 - *Why:* Justas wants merges to deploy the server by themselves, with a backup first, and CI to prove the playbook builds a server from empty. Issue #9.

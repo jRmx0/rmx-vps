@@ -263,7 +263,7 @@ The server clone can also **push**, using a repo-only deploy key (see below). Pu
 ### Pushing from the server
 
 - Deploy key `/home/rmx/.ssh/github-rmx-vps` (ed25519, no passphrase), added to this repo with **write access**. It works for this repo only, not the rest of the GitHub account.
-- `~rmx/.ssh/config` has `Host github-rmx-vps` → `github.com` with that key; the remote is `git@github-rmx-vps:jRmx0/rmx-vps.git`.
+- `~rmx/.ssh/config` has `Host github-rmx-vps` → `github.com` with that key; the remote is `git@github-rmx-vps:rmx-lt/rmx-vps.git`.
 - Commit identity (repo-local): `jRmx0 <116594512+jRmx0@users.noreply.github.com>`.
 - Always work as `rmx` (root has no access to the key):
 
@@ -373,7 +373,7 @@ Not public (reachable only by containers on `rmx_edge`): Mosquitto's plain MQTT 
 
 ### Firmware images (OTA)
 
-The LTE modem board ([rmx-mower-modem-probe](https://github.com/jRmx0/rmx-mower-modem-probe), README "Firmware updates") downloads new firmware from `https://api.rmx.lt/fw/probe/<version>.bin`.
+The LTE modem board ([rmx-mower-modem-probe](https://github.com/rmx-lt/rmx-mower-modem-probe), README "Firmware updates") downloads new firmware from `https://api.rmx.lt/fw/probe/<version>.bin`.
 
 - Files: `services/caddy/firmware/` on the host → `/srv/fw` in Caddy, read-only. `firmware/probe/<version>.bin` is served as `/fw/probe/<version>.bin`. Range requests work (the device resumes dropped downloads); directories give 404, not a listing.
 - Login: HTTP basic auth, one login per device, in `services/caddy/private/fw-users.caddy` (server only, gitignored; template [`fw-users.caddy.example`](services/caddy/fw-users.caddy.example)). Plain-text copies go in `caddy/private/credentials.txt` (root, `0600`). **The file must exist or Caddy won't start**; an empty file locks `/fw/` (401 for everyone). Tested with Caddy 2.11.2 (2026-10-22, locally): no login 401, wrong password 401, right one 200, `Range` 206, directory 404, missing users file = config error, empty file = 401.
@@ -414,7 +414,7 @@ Then copy the password into the device's `sdkconfig` (`CONFIG_PROBE_OTA_PASSWORD
 | `app` | `mower/#` (read + write) | The backend app (Phase 5) |
 | `mower-01` | `mower/mower-01/#` only | First mower |
 | `probe-app` | `probe/#` (read + write) | rmx-backend-probe server |
-| `probe-device` | write `probe/req/probe-device`; read `probe/res/probe-device`, `probe/events/#`, `probe/status/#` | The ESP32 LTE probe device ([rmx-mower-modem-probe](https://github.com/jRmx0/rmx-mower-modem-probe)), password in its gitignored `sdkconfig` |
+| `probe-device` | write `probe/req/probe-device`; read `probe/res/probe-device`, `probe/events/#`, `probe/status/#` | The ESP32 LTE probe device ([rmx-mower-modem-probe](https://github.com/rmx-lt/rmx-mower-modem-probe)), password in its gitignored `sdkconfig` |
 
 The rules in [`config/acl`](services/mosquitto/config/acl): `probe-app` and `probe-device` have explicit `user` entries; every login also gets `mower/<its username>/#` (`pattern readwrite mower/%u/#`). A new mower needs a login only, no ACL change. Planned topics: `mower/<id>/telemetry`, `mower/<id>/status` (retained, also the last-will), `mower/<id>/cmd`, `mower/<id>/cmd/ack`.
 
@@ -502,14 +502,14 @@ Check the certificates from the PC: `curl.exe -vI https://rmx.lt` (Windows curl 
 
 ### Probe (rmx-backend-probe)
 
-[rmx-backend-probe](https://github.com/jRmx0/rmx-backend-probe) is a learning/diagnostic app and a full rehearsal of the production workflow: a Rust server plus a React page with a live table, CRUD over HTTPS REST, WSS and MQTT over WSS, logged to TimescaleDB. Its README section "Deployment" is the contract this setup follows. The deploy setup below will be copied for the production app.
+[rmx-backend-probe](https://github.com/rmx-lt/rmx-backend-probe) is a learning/diagnostic app and a full rehearsal of the production workflow: a Rust server plus a React page with a live table, CRUD over HTTPS REST, WSS and MQTT over WSS, logged to TimescaleDB. Its README section "Deployment" is the contract this setup follows. The deploy setup below will be copied for the production app.
 
 **Containers** ([`services/probe/compose.yaml`](services/probe/compose.yaml)), Compose profile `probe`, so a plain `docker compose up -d` leaves them alone:
 
 | Container | Image | Networks | Memory | Notes |
 |---|---|---|---|---|
 | `probe-db` | `timescale/timescaledb:2.30.2-pg17` | `rmx_backend` | `mem_limit 256m` (~60 MB used) | No ports. Tuned small: `shared_buffers=32MB`, `work_mem=2MB`, `max_connections=20`, no parallel workers, `timescaledb.max_background_workers=3`, `timescaledb.telemetry_level=off`. Data in `probe/data/db/` |
-| `probe-app` | `ghcr.io/jrmx0/rmx-backend-probe:${PROBE_TAG}` | `rmx_edge` + `rmx_backend` | `mem_limit 64m` (~8 MB used) | No ports; Caddy proxies to `probe-app:8080`. Health check every 5 s (`/probe/health`) |
+| `probe-app` | `ghcr.io/rmx-lt/rmx-backend-probe:${PROBE_TAG}` | `rmx_edge` + `rmx_backend` | `mem_limit 64m` (~8 MB used) | No ports; Caddy proxies to `probe-app:8080`. Health check every 5 s (`/probe/health`) |
 
 The whole probe uses about 50–70 MB of RAM while running (measured 2026-10-18: ~50 MB more "available" after stopping it).
 
@@ -533,7 +533,7 @@ The app login itself lives in the probe database (`users` table, Argon2id hash);
 | `https://api.rmx.lt/probe/health` | probe-app health JSON (200 / 503) | None (only up/down and the version) |
 | `mqtts://mqtt.rmx.lt:8883` | Mosquitto (devices only, e.g. `probe-device`) | MQTT login per device |
 
-**Login** (since 2026-10-19; before that, Caddy basic auth): the app has its own login page and server-side sessions. After login the browser holds an `HttpOnly`, `Secure`, `SameSite=Strict` cookie (`__Secure-probe_session`, `Path=/probe`); the app checks it on every API request and on the WebSocket handshake, which also fixed WSS on iPhones (WebKit sends cookies on WebSocket handshakes, but not basic-auth credentials). Requests that change something and WebSocket handshakes must come from `https://api.rmx.lt` (`ALLOWED_ORIGINS` in `probe/compose.yaml`), and failed logins slow down (per username and IP). Why each choice: the probe README, ["Login and sessions"](https://github.com/jRmx0/rmx-backend-probe#login-and-sessions).
+**Login** (since 2026-10-19; before that, Caddy basic auth): the app has its own login page and server-side sessions. After login the browser holds an `HttpOnly`, `Secure`, `SameSite=Strict` cookie (`__Secure-probe_session`, `Path=/probe`); the app checks it on every API request and on the WebSocket handshake, which also fixed WSS on iPhones (WebKit sends cookies on WebSocket handshakes, but not basic-auth credentials). Requests that change something and WebSocket handshakes must come from `https://api.rmx.lt` (`ALLOWED_ORIGINS` in `probe/compose.yaml`), and failed logins slow down (per username and IP). Why each choice: the probe README, ["Login and sessions"](https://github.com/rmx-lt/rmx-backend-probe#login-and-sessions).
 
 **Users** (no sign-up page; run on the server, in `/opt/rmx-vps/services`, with the probe on). The password is piped in from stdin, so it never appears on a command line:
 
@@ -583,7 +583,7 @@ GitHub Actions --ssh deploy@45.81.252.43 "sha-1234abc"--> forced command
 
 ```bash
 ssh-keygen -t ed25519 -N "" -C rmx-backend-probe-deploy -f ./deploy_key
-gh secret set DEPLOY_SSH_KEY -R jRmx0/rmx-backend-probe < ./deploy_key
+gh secret set DEPLOY_SSH_KEY -R rmx-lt/rmx-backend-probe < ./deploy_key
 ```
 
 Then on the server, replace the key part of the one line in `/home/deploy/.ssh/authorized_keys` (keep the `restrict,command=…` prefix) with the content of `deploy_key.pub`, and delete both local files. The old key stops working as soon as the line is replaced.
@@ -619,7 +619,7 @@ Then on the server, replace the key part of the one line in `/home/deploy/.ssh/a
 
 ```bash
 # empty Ubuntu 24.04 VPS, as root (provider dashboard terminal):
-curl -fsSL https://raw.githubusercontent.com/jRmx0/rmx-vps/production/ansible/bootstrap.sh | bash
+curl -fsSL https://raw.githubusercontent.com/rmx-lt/rmx-vps/production/ansible/bootstrap.sh | bash
 # later, on the server: preview, then apply
 cd /opt/rmx-vps/ansible && ./bootstrap.sh --check --diff && ./bootstrap.sh
 ```
