@@ -1,6 +1,6 @@
 #!/bin/bash
 # Deploy one image tag of rmx-backend-probe. Installed as
-# /usr/local/sbin/rmx-deploy-probe (root:root 0755). See README §10 "Probe".
+# /usr/local/sbin/rmx-deploy-probe (root:root 0755). See wiki Server §10 "Probe".
 #
 # Called by GitHub Actions over SSH as the user "deploy". That user's
 # authorized_keys entry forces this command, and sudoers lets it run this
@@ -19,7 +19,7 @@ umask 077
 SERVICES=/opt/rmx-vps/services
 # Holds the passwords and PROBE_TAG; only the PROBE_TAG line is rewritten.
 ENV_FILE=$SERVICES/probe/.env
-IMAGE=ghcr.io/jrmx0/rmx-backend-probe
+IMAGE=ghcr.io/rmx-lt/rmx-backend-probe
 LOG=/var/log/rmx-deploy-probe.log
 HEALTH_TIMEOUT=90
 
@@ -47,7 +47,7 @@ cd "$SERVICES"
 compose() { docker compose --profile probe "$@"; }
 
 if [[ ! -f $ENV_FILE ]]; then
-	log "REFUSED $TAG: $ENV_FILE is missing (see README §10 Probe)"
+	log "REFUSED $TAG: $ENV_FILE is missing (see wiki Server §10 Probe)"
 	exit 1
 fi
 PREV=$(sed -n 's/^PROBE_TAG=\(sha-[0-9a-f]\{7\}\)$/\1/p' "$ENV_FILE")
@@ -94,7 +94,7 @@ compose up -d --no-deps probe-app
 if wait_healthy; then
 	log "OK $TAG: probe-app healthy"
 	# Remove old probe images (the running one is kept; a rollback re-pulls).
-	docker image prune -af --filter "label=org.opencontainers.image.source=https://github.com/jRmx0/rmx-backend-probe" >/dev/null || true
+	docker image prune -af --filter "label=org.opencontainers.image.source=https://github.com/rmx-lt/rmx-backend-probe" >/dev/null || true
 	exit 0
 fi
 
