@@ -26,7 +26,7 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 apt-get install -y -qq git ansible-core python3-apt >/dev/null
 
-# The admin user owns the clone (read-only; README §9). Created here because
+# The admin user owns the clone (read-only; wiki Server §9). Created here because
 # the clone comes first; the playbook sets up the rest of it.
 id "$ADMIN" &>/dev/null || useradd --create-home --shell /bin/bash "$ADMIN"
 

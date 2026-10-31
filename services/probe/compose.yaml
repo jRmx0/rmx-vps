@@ -1,5 +1,5 @@
 # rmx-backend-probe: a learning/diagnostic app (github.com/rmx-lt/rmx-backend-probe)
-# and a rehearsal of the production deploy. See README §10 "Probe".
+# and a rehearsal of the production deploy. See wiki Server §10 "Probe".
 #
 # Compose profile "probe": OFF by default. A plain `docker compose up -d`
 # ignores these two services. Turn on / off:
